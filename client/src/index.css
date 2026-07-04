@@ -285,4 +285,109 @@
   .border.hover-elevate:not(.no-hover-interaction-elevate)::after {
     inset: -1px;
   }
+
+  /* PREMIUM WEB3 STELLAR SYSTEM DESIGN BY KRYDO */
+  .stellar-space-bg {
+    background-image: 
+      radial-gradient(at 0% 0%, hsla(221, 83%, 53%, 0.08) 0px, transparent 50%),
+      radial-gradient(at 50% 0%, hsla(271, 81%, 56%, 0.05) 0px, transparent 50%),
+      radial-gradient(at 100% 100%, hsla(191, 74%, 42%, 0.08) 0px, transparent 50%),
+      radial-gradient(at 0% 100%, hsla(339, 82%, 56%, 0.05) 0px, transparent 50%);
+  }
+
+  .glass-card {
+    background: rgba(var(--card), 0.5);
+    backdrop-filter: blur(16px);
+    -webkit-backdrop-filter: blur(16px);
+    border: 1px solid rgba(255, 255, 255, 0.05);
+  }
+
+  .dark .glass-card {
+    background: rgba(15, 23, 42, 0.4);
+    border: 1px solid rgba(255, 255, 255, 0.03);
+    box-shadow: 0 4px 30px rgba(0, 0, 0, 0.2);
+  }
+
+  .gradient-text {
+    background: linear-gradient(135deg, #60a5fa 0%, #a78bfa 50%, #f472b6 100%);
+    -webkit-background-clip: text;
+    -webkit-text-fill-color: transparent;
+    background-clip: text;
+  }
+
+  .gradient-text-stellar {
+    background: linear-gradient(90deg, #38bdf8 0%, #818cf8 50%, #ec4899 100%);
+    -webkit-background-clip: text;
+    -webkit-text-fill-color: transparent;
+    background-clip: text;
+  }
+
+  .glow-primary {
+    box-shadow: 0 0 20px -3px hsla(221, 83%, 53%, 0.2);
+  }
+
+  .glow-secondary {
+    box-shadow: 0 0 20px -3px hsla(271, 81%, 56%, 0.15);
+  }
+
+  .glow-success {
+    box-shadow: 0 0 20px -3px hsla(142, 70%, 45%, 0.2);
+  }
+
+  .glow-card-hover {
+    transition: all 0.3s cubic-bezier(0.16, 1, 0.3, 1);
+  }
+
+  .glow-card-hover:hover {
+    transform: translateY(-2px);
+    box-shadow: 0 12px 30px -10px rgba(0, 0, 0, 0.1), 0 0 20px -5px hsla(221, 83%, 53%, 0.15);
+    border-color: hsla(221, 83%, 53%, 0.3);
+  }
+
+  .dark .glow-card-hover:hover {
+    box-shadow: 0 12px 40px -12px rgba(0, 0, 0, 0.5), 0 0 25px -4px hsla(221, 83%, 53%, 0.25);
+    border-color: hsla(221, 83%, 53%, 0.4);
+  }
+
+  /* Smooth progress gradient animate */
+  @keyframes gradient-shift {
+    0% { background-position: 0% 50%; }
+    50% { background-position: 100% 50%; }
+    100% { background-position: 0% 50%; }
+  }
+
+  .animate-gradient-shift {
+    background-size: 200% 200%;
+    animation: gradient-shift 6s ease infinite;
+  }
+
+  /* Floating animation */
+  @keyframes float {
+    0% { transform: translateY(0px); }
+    50% { transform: translateY(-10px); }
+    100% { transform: translateY(0px); }
+  }
+
+  .animate-float {
+    animation: float 5s ease-in-out infinite;
+  }
+
+  .animate-float-delayed {
+    animation: float 6s ease-in-out infinite;
+    animation-delay: 2s;
+  }
+
+  /* Grid overlay for futuristic vibe */
+  .grid-bg-overlay {
+    background-size: 40px 40px;
+    background-image: 
+      linear-gradient(to right, rgba(128, 128, 128, 0.05) 1px, transparent 1px),
+      linear-gradient(to bottom, rgba(128, 128, 128, 0.05) 1px, transparent 1px);
+  }
+
+  .dark .grid-bg-overlay {
+    background-image: 
+      linear-gradient(to right, rgba(255, 255, 255, 0.02) 1px, transparent 1px),
+      linear-gradient(to bottom, rgba(255, 255, 255, 0.02) 1px, transparent 1px);
+  }
 }

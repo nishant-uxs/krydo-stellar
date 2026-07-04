@@ -2,7 +2,7 @@ import { useState, useMemo, useEffect } from "react";
 import { useWallet, shortenAddress } from "@/lib/wallet";
 import { useQuery, useMutation } from "@tanstack/react-query";
 import { apiRequest, queryClient } from "@/lib/queryClient";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
@@ -20,6 +20,7 @@ import {
   DialogContent,
   DialogHeader,
   DialogTitle,
+  DialogDescription,
 } from "@/components/ui/dialog";
 import { useToast } from "@/hooks/use-toast";
 import {
@@ -36,11 +37,24 @@ import {
   Link2,
   ExternalLink,
   QrCode,
+  Sparkles,
+  ChevronRight,
+  Check
 } from "lucide-react";
 import type { Credential, ZkProof } from "@shared/schema";
 import { proofTypeLabels, claimTypeLabels, type ProofType, type ClaimType } from "@shared/schema";
 import { motion } from "framer-motion";
 import { QrCodeCanvas } from "@/components/qr-code-canvas";
+
+const fadeUp = {
+  initial: { opacity: 0, y: 15 },
+  animate: { opacity: 1, y: 0 },
+  transition: { duration: 0.45, ease: [0.16, 1, 0.3, 1] },
+};
+
+const stagger = {
+  animate: { transition: { staggerChildren: 0.06 } },
+};
 
 export default function ZkProofsPage() {
   const { address } = useWallet();
@@ -75,11 +89,6 @@ export default function ZkProofsPage() {
 
   const activeCredentials = credentials?.filter((c) => c.status === "active") || [];
 
-  // The holder's underlying numeric claim value (if any). Shown in the UI
-  // so the holder knows what range thresholds are sensible, and used below
-  // to cap threshold input so they can't claim more than they hold.
-  // Empty strings must return null (not 0) — Number('') === 0 would show
-  // "Your value: 0" for credentials with no numeric value.
   const credentialNumericValue = useMemo<number | null>(() => {
     const v = (credentialFields as Record<string, string>).value;
     if (v === undefined) return null;
@@ -89,12 +98,6 @@ export default function ZkProofsPage() {
     return Number.isFinite(n) ? n : null;
   }, [credentialFields]);
 
-  // A credential whose `value` is present but non-numeric (e.g. "above 650"
-  // as a string). Range / equality proofs on such values fall through to
-  // the ZK engine's hashed-scalar path, which the engine rejects for range
-  // proofs. We mirror that here so the UI can hide those options up front
-  // and surface a clear reason, instead of letting the user submit and
-  // only then see a 400.
   const hasNonNumericValue = useMemo<boolean>(() => {
     const v = (credentialFields as Record<string, string>).value;
     if (v === undefined) return false;
@@ -103,10 +106,6 @@ export default function ZkProofsPage() {
     return !Number.isFinite(Number(trimmed));
   }, [credentialFields]);
 
-  // Keep the selected proof type consistent with what the current
-  // credential actually supports. If the user picked range_above on a
-  // numeric credential and then swapped to a non-numeric one, bounce them
-  // to a type that still makes sense.
   useEffect(() => {
     if (hasNonNumericValue && (proofType === "range_above" || proofType === "range_below")) {
       setProofType("equality");
@@ -128,9 +127,6 @@ export default function ZkProofsPage() {
         if (!threshold) throw new Error("Threshold is required for range proofs");
         const t = parseFloat(threshold);
         if (!Number.isFinite(t)) throw new Error("Threshold must be a valid number");
-        // Cap threshold against the actual credential value so the holder
-        // cannot generate a cryptographically valid proof claiming more
-        // than they hold. The server enforces the same rule as a backstop.
         if (credentialNumericValue !== null) {
           if (proofType === "range_above" && t > credentialNumericValue) {
             throw new Error(
@@ -147,12 +143,6 @@ export default function ZkProofsPage() {
       }
       if (proofType === "equality") {
         if (!targetValue) throw new Error("Target value is required");
-        // For numeric credentials, refuse to generate an equality proof
-        // against a target that we already know won't match. A non-matching
-        // proof is technically valid output (verified=false) but it wastes
-        // the holder's time and produces garbage rows in their proof list.
-        // The target is public once the proof is shared anyway, so this
-        // guard doesn't leak any additional information.
         if (credentialNumericValue !== null) {
           const t = Number(String(targetValue).trim());
           if (Number.isFinite(t) && t !== credentialNumericValue) {
@@ -168,8 +158,6 @@ export default function ZkProofsPage() {
         body.selectedFields = selectedFields;
       }
 
-      // ZK proofs are generated off-chain — no Freighter popup, no on-chain
-      // anchor. The holder can share the proof with verifiers directly.
       const res = await apiRequest("POST", "/api/zk/generate", body);
       return await res.json();
     },
@@ -182,7 +170,7 @@ export default function ZkProofsPage() {
       toast({
         title: "ZK Proof Generated",
         description: data.verified
-          ? "Proof verified."
+          ? "Proof verified successfully."
           : "Proof generated but claim does NOT satisfy the condition.",
       });
     },
@@ -198,418 +186,476 @@ export default function ZkProofsPage() {
   };
 
   return (
-    <div className="p-6 max-w-4xl mx-auto space-y-6">
-      <div>
-        <h1 className="font-serif text-2xl font-bold" data-testid="text-zk-title">
-          Zero-Knowledge Proofs
-        </h1>
-        <p className="text-sm text-muted-foreground mt-1">
-          Prove facts about your credentials without revealing sensitive data
-        </p>
+    <div className="p-6 md:p-8 max-w-4xl mx-auto space-y-8 relative">
+      <div className="absolute top-0 right-10 w-72 h-72 rounded-full bg-primary/5 blur-[120px] pointer-events-none" />
+
+      {/* Header */}
+      <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 pb-6 border-b">
+        <div>
+          <Badge variant="outline" className="text-[10px] uppercase font-mono tracking-widest text-primary bg-primary/5 py-1 px-2">
+            Zero-Knowledge Engine
+          </Badge>
+          <h1 className="font-serif text-3xl font-extrabold tracking-tight mt-2 flex items-center gap-2" data-testid="text-zk-title">
+            Zero-Knowledge Proofs
+            <Fingerprint className="w-6 h-6 text-primary" />
+          </h1>
+          <p className="text-sm text-muted-foreground mt-1 font-sans">
+            Prove facts about your credentials mathematically without revealing any sensitive underlying data.
+          </p>
+        </div>
       </div>
 
-      <Card>
-        <CardHeader>
-          <CardTitle className="text-base flex items-center gap-2">
-            <Lock className="w-4 h-4" />
-            Generate ZK Proof
-          </CardTitle>
-        </CardHeader>
-        <CardContent className="space-y-4">
-          <div>
-            <label className="text-sm font-medium mb-2 block">Select Credential</label>
-            {credsLoading ? (
-              <Skeleton className="h-10 w-full" />
-            ) : activeCredentials.length === 0 ? (
-              <p className="text-sm text-muted-foreground">No active credentials available</p>
-            ) : (
-              <Select
-                value={selectedCredential?.id || ""}
-                onValueChange={(id) => {
-                  setSelectedCredential(activeCredentials.find((c) => c.id === id) || null);
-                  // Different credential = different numeric cap.
-                  // Clear inputs so a threshold valid for the previous
-                  // credential can't silently exceed the new one's cap.
-                  setSelectedFields([]);
-                  setThreshold("");
-                  setTargetValue("");
-                }}
-              >
-                <SelectTrigger data-testid="select-zk-credential">
-                  <SelectValue placeholder="Choose a credential..." />
-                </SelectTrigger>
-                <SelectContent>
-                  {activeCredentials.map((cred) => (
-                    <SelectItem key={cred.id} value={cred.id}>
-                      {claimTypeLabels[cred.claimType as ClaimType] || cred.claimType} — {cred.claimSummary}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-            )}
-          </div>
+      <div className="grid grid-cols-1 lg:grid-cols-12 gap-8 items-start">
+        
+        {/* LEFT COLUMN: FORM GENERATION */}
+        <div className="lg:col-span-7 space-y-6">
+          <Card className="border-border/80 bg-card/45 backdrop-blur-sm shadow-xl rounded-2xl relative overflow-hidden">
+            <div className="absolute top-0 right-0 w-32 h-32 bg-primary/5 rounded-full blur-3xl pointer-events-none" />
+            
+            <CardHeader className="pb-4 border-b">
+              <CardTitle className="text-base font-serif font-bold flex items-center gap-2">
+                <Lock className="w-4.5 h-4.5 text-primary" />
+                Configure Mathematical Statement
+              </CardTitle>
+              <CardDescription className="text-xs">
+                Draft a formal cryptographic predicate over your selected claim
+              </CardDescription>
+            </CardHeader>
 
-          {selectedCredential && (
-            <div className="p-3 rounded-md bg-muted/50 border text-sm space-y-1">
-              <div className="flex items-center gap-2 flex-wrap">
-                <Badge variant="secondary" className="text-[10px] bg-chart-3/15 text-chart-3 no-default-active-elevate">
-                  {claimTypeLabels[selectedCredential.claimType as ClaimType]}
-                </Badge>
-                {Object.keys(credentialFields).length > 1 && (
-                  <Badge variant="secondary" className="text-[10px] bg-primary/15 text-primary no-default-active-elevate">
-                    {Object.keys(credentialFields).length} fields
-                  </Badge>
+            <CardContent className="pt-6 space-y-5">
+              
+              {/* Select Credential */}
+              <div className="space-y-1.5">
+                <label className="text-xs font-bold uppercase tracking-wider text-muted-foreground block">Select Credential</label>
+                {credsLoading ? (
+                  <Skeleton className="h-10 w-full rounded-xl" />
+                ) : activeCredentials.length === 0 ? (
+                  <p className="text-sm text-muted-foreground py-2 font-sans italic">No active credentials available to prove.</p>
+                ) : (
+                  <Select
+                    value={selectedCredential?.id || ""}
+                    onValueChange={(id) => {
+                      setSelectedCredential(activeCredentials.find((c) => c.id === id) || null);
+                      setSelectedFields([]);
+                      setThreshold("");
+                      setTargetValue("");
+                    }}
+                  >
+                    <SelectTrigger data-active={!!selectedCredential} className="rounded-xl border-border/80 focus:ring-primary/20" data-testid="select-zk-credential">
+                      <SelectValue placeholder="Choose a credential..." />
+                    </SelectTrigger>
+                    <SelectContent className="rounded-xl">
+                      {activeCredentials.map((cred) => (
+                        <SelectItem key={cred.id} value={cred.id}>
+                          {claimTypeLabels[cred.claimType as ClaimType] || cred.claimType} — {cred.claimSummary}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
                 )}
               </div>
-              <p className="text-muted-foreground">{selectedCredential.claimSummary}</p>
-              {credentialNumericValue !== null && (
-                <p className="text-sm">
-                  <span className="text-muted-foreground">Your value: </span>
-                  <span className="font-semibold" data-testid="text-cred-value">
-                    {credentialNumericValue}
-                  </span>
-                </p>
-              )}
-              {hasNonNumericValue && (
-                <p className="text-xs text-chart-4" data-testid="text-non-numeric-warning">
-                  This credential has a non-numeric value, so range proofs are not
-                  available. Use Exact Match or Selective Disclosure instead.
-                </p>
-              )}
-              <p className="font-mono text-xs text-muted-foreground">
-                Hash: {selectedCredential.credentialHash.slice(0, 24)}...
-              </p>
-            </div>
-          )}
 
-          <div>
-            <label className="text-sm font-medium mb-2 block">Proof Type</label>
-            <Select
-              value={proofType}
-              onValueChange={(v) => {
-                setProofType(v as ProofType);
-                // Reset all type-specific inputs so a threshold typed for
-                // one proof type can't silently become invalid for another.
-                setSelectedFields([]);
-                setThreshold("");
-                setTargetValue("");
-              }}
-            >
-              <SelectTrigger data-testid="select-proof-type">
-                <SelectValue />
-              </SelectTrigger>
-              <SelectContent>
-                {/*
-                  Only expose the proof types that have a complete input UI.
-                  membership (needs a member-set editor) and non_zero (needs
-                  an explainer + dedicated button) are supported by the ZK
-                  engine but the form surface for them hasn't been built, so
-                  they're hidden to avoid dead-end UX.
-                  Range proofs are also hidden when the selected credential
-                  has a non-numeric value — the engine would reject them.
-                  See shared/schema.ts for the full supported set.
-                */}
-                {(Object.entries(proofTypeLabels) as [ProofType, string][])
-                  .filter(([key]) => {
-                    if (key === "membership" || key === "non_zero") return false;
-                    if (hasNonNumericValue && (key === "range_above" || key === "range_below")) return false;
-                    return true;
-                  })
-                  .map(([key, label]) => (
-                    <SelectItem key={key} value={key}>
-                      {label}
-                    </SelectItem>
-                  ))}
-              </SelectContent>
-            </Select>
-          </div>
-
-          {proofType === "selective_disclosure" && selectedCredential && (
-            <div className="space-y-2">
-              <label className="text-sm font-medium mb-2 block">
-                <Eye className="w-3.5 h-3.5 inline mr-1" />
-                Select Fields to Disclose
-              </label>
-              <p className="text-xs text-muted-foreground mb-2">
-                Choose which credential fields to reveal. Unselected fields remain hidden behind cryptographic commitments.
-              </p>
-              {Object.keys(credentialFields).length > 0 ? (
-                <div className="space-y-2 p-3 rounded-md bg-muted/50 border">
-                  {Object.entries(credentialFields).map(([fieldName, fieldValue]) => (
-                    <div key={fieldName} className="flex items-center gap-3">
-                      <Checkbox
-                        id={`field-${fieldName}`}
-                        checked={selectedFields.includes(fieldName)}
-                        onCheckedChange={(checked) => {
-                          setSelectedFields(
-                            checked
-                              ? [...selectedFields, fieldName]
-                              : selectedFields.filter((f) => f !== fieldName)
-                          );
-                        }}
-                        data-testid={`checkbox-field-${fieldName}`}
-                      />
-                      <label htmlFor={`field-${fieldName}`} className="flex-1 flex items-center justify-between cursor-pointer">
-                        <span className="text-sm font-medium capitalize">{fieldName.replace(/_/g, " ")}</span>
-                        {selectedFields.includes(fieldName) ? (
-                          <Badge variant="secondary" className="text-[10px] bg-chart-3/15 text-chart-3 no-default-active-elevate">
-                            <Eye className="w-2.5 h-2.5 mr-0.5" />
-                            Disclosed
-                          </Badge>
-                        ) : (
-                          <Badge variant="secondary" className="text-[10px] bg-muted text-muted-foreground no-default-active-elevate">
-                            <EyeOff className="w-2.5 h-2.5 mr-0.5" />
-                            Hidden
-                          </Badge>
-                        )}
-                      </label>
+              {/* Selected Credential Stats / Meta Info */}
+              {selectedCredential && (
+                <motion.div 
+                  initial={{ opacity: 0, scale: 0.98 }}
+                  animate={{ opacity: 1, scale: 1 }}
+                  className="p-4 rounded-xl bg-background/60 border border-border/50 text-sm space-y-2.5 relative"
+                >
+                  <div className="flex items-center gap-2 flex-wrap">
+                    <Badge variant="secondary" className="text-[10px] font-semibold bg-chart-3/10 text-chart-3 border-chart-3/20 no-default-active-elevate rounded-full">
+                      {claimTypeLabels[selectedCredential.claimType as ClaimType]}
+                    </Badge>
+                    {Object.keys(credentialFields).length > 1 && (
+                      <Badge variant="secondary" className="text-[10px] font-semibold bg-primary/10 text-primary border-primary/20 no-default-active-elevate rounded-full">
+                        {Object.keys(credentialFields).length} fields
+                      </Badge>
+                    )}
+                  </div>
+                  <p className="text-muted-foreground font-sans text-xs leading-relaxed">{selectedCredential.claimSummary}</p>
+                  
+                  {credentialNumericValue !== null && (
+                    <div className="flex items-center gap-1 text-xs">
+                      <span className="text-muted-foreground font-sans">Your private ledger value: </span>
+                      <span className="font-semibold font-mono text-primary bg-primary/10 px-2 py-0.5 rounded" data-testid="text-cred-value">
+                        {credentialNumericValue}
+                      </span>
                     </div>
-                  ))}
-                </div>
-              ) : (
-                <p className="text-sm text-muted-foreground">This credential has no multi-field data available.</p>
+                  )}
+
+                  {hasNonNumericValue && (
+                    <div className="p-3 bg-chart-4/5 rounded-lg border border-chart-4/15 text-xs text-chart-4 flex gap-2 items-start" data-testid="text-non-numeric-warning">
+                      <Lock className="w-4 h-4 shrink-0 mt-0.5" />
+                      <p>
+                        This claim uses a non-numeric value. Range proof algorithms are restricted. Please generate an <strong>Exact Match</strong> or <strong>Selective Disclosure</strong> proof instead.
+                      </p>
+                    </div>
+                  )}
+                  
+                  <p className="font-mono text-[10px] text-muted-foreground/75 border-t pt-2 block truncate">
+                    Hash: {selectedCredential.credentialHash}
+                  </p>
+                </motion.div>
               )}
-            </div>
-          )}
 
-          {(proofType === "range_above" || proofType === "range_below") && (
-            <div>
-              <label className="text-sm font-medium mb-2 block">
-                Threshold Value
-              </label>
-              <Input
-                type="number"
-                placeholder={proofType === "range_above" ? "e.g. 700 (prove value >= this)" : "e.g. 50 (prove value <= this)"}
-                value={threshold}
-                onChange={(e) => setThreshold(e.target.value)}
-                max={
-                  proofType === "range_above" && credentialNumericValue !== null
-                    ? credentialNumericValue
-                    : undefined
-                }
-                min={
-                  proofType === "range_below" && credentialNumericValue !== null
-                    ? credentialNumericValue
-                    : undefined
-                }
-                data-testid="input-zk-threshold"
-              />
-              <p className="text-xs text-muted-foreground mt-1">
-                {proofType === "range_above"
-                  ? credentialNumericValue !== null
-                    ? `Prove your value is at or above this threshold. Max allowed: ${credentialNumericValue} (your actual value).`
-                    : "Proves your credential value is at or above this threshold without revealing the exact value"
-                  : credentialNumericValue !== null
-                    ? `Prove your value is at or below this threshold. Min allowed: ${credentialNumericValue} (your actual value).`
-                    : "Proves your credential value is at or below this threshold without revealing the exact value"}
-              </p>
-            </div>
-          )}
+              {/* Select Proof Type */}
+              <div className="space-y-1.5">
+                <label className="text-xs font-bold uppercase tracking-wider text-muted-foreground block">Proof Type</label>
+                <Select
+                  value={proofType}
+                  onValueChange={(v) => {
+                    setProofType(v as ProofType);
+                    setSelectedFields([]);
+                    setThreshold("");
+                    setTargetValue("");
+                  }}
+                >
+                  <SelectTrigger className="rounded-xl border-border/80 focus:ring-primary/20 text-sm" data-testid="select-proof-type">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent className="rounded-xl">
+                    {(Object.entries(proofTypeLabels) as [ProofType, string][])
+                      .filter(([key]) => {
+                        if (key === "membership" || key === "non_zero") return false;
+                        if (hasNonNumericValue && (key === "range_above" || key === "range_below")) return false;
+                        return true;
+                      })
+                      .map(([key, label]) => (
+                        <SelectItem key={key} value={key}>
+                          {label}
+                        </SelectItem>
+                      ))}
+                  </SelectContent>
+                </Select>
+              </div>
 
-          {proofType === "equality" && (
-            <div>
-              <label className="text-sm font-medium mb-2 block">Target Value</label>
-              <Input
-                placeholder={
-                  credentialNumericValue !== null
-                    ? `Must equal ${credentialNumericValue}`
-                    : "Value to prove equality with"
-                }
-                value={targetValue}
-                onChange={(e) => setTargetValue(e.target.value)}
-                data-testid="input-zk-target"
-              />
-              <p className="text-xs text-muted-foreground mt-1">
-                {credentialNumericValue !== null
-                  ? `Proves your value equals this target. Must match your credential value (${credentialNumericValue}) to be verifiable.`
-                  : "Proves your credential value equals this target."}
-              </p>
-            </div>
-          )}
-
-          <Button
-            onClick={() => generateMutation.mutate()}
-            disabled={!selectedCredential || generateMutation.isPending}
-            className="w-full"
-            data-testid="button-generate-proof"
-          >
-            {generateMutation.isPending ? (
-              <>
-                <Loader2 className="w-4 h-4 mr-2 animate-spin" />
-                Generating ZK Proof...
-              </>
-            ) : (
-              <>
-                <Fingerprint className="w-4 h-4 mr-2" />
-                Generate Proof
-              </>
-            )}
-          </Button>
-        </CardContent>
-      </Card>
-
-      <div>
-        <h2 className="font-serif text-lg font-semibold mb-3">Generated Proofs</h2>
-        {proofsLoading ? (
-          <div className="space-y-3">
-            {[1, 2].map((i) => (
-              <Skeleton key={i} className="h-24 w-full" />
-            ))}
-          </div>
-        ) : proofs && proofs.length > 0 ? (
-          <div className="space-y-3">
-            {proofs.map((proof, i) => (
-              <motion.div
-                key={proof.id}
-                initial={{ opacity: 0, y: 8 }}
-                animate={{ opacity: 1, y: 0 }}
-                transition={{ delay: i * 0.05 }}
-              >
-                <Card data-testid={`card-zk-proof-${proof.id}`}>
-                  <CardContent className="p-4">
-                    <div className="flex items-start justify-between gap-3">
-                      <div className="min-w-0 flex-1 space-y-1">
-                        <div className="flex items-center gap-2 flex-wrap">
-                          <h3 className="text-sm font-semibold">
-                            {proofTypeLabels[proof.proofType as ProofType] || proof.proofType}
-                          </h3>
-                          <Badge
-                            variant="secondary"
-                            className={`text-[10px] no-default-active-elevate ${
-                              proof.verified
-                                ? "bg-chart-3/15 text-chart-3"
-                                : "bg-chart-4/15 text-chart-4"
-                            }`}
-                          >
-                            {proof.verified ? "Verified" : "Pending"}
-                          </Badge>
-                          {proof.onChainTxHash ? (
-                            <Badge
-                              variant="secondary"
-                              className="text-[10px] bg-chart-1/15 text-chart-1 no-default-active-elevate cursor-pointer"
-                              onClick={() => window.open(`https://stellar.expert/explorer/testnet/tx/${proof.onChainTxHash}`, "_blank")}
-                              data-testid={`badge-onchain-${proof.id}`}
-                            >
-                              <Link2 className="w-2.5 h-2.5 mr-0.5" />
-                              On-Chain
-                              <ExternalLink className="w-2 h-2 ml-0.5" />
-                            </Badge>
-                          ) : (
-                            <Badge variant="secondary" className="text-[10px] bg-muted text-muted-foreground no-default-active-elevate">
-                              Off-Chain
-                            </Badge>
-                          )}
+              {/* Selective Disclosure Sub-panel */}
+              {proofType === "selective_disclosure" && selectedCredential && (
+                <motion.div 
+                  initial={{ opacity: 0, y: 10 }}
+                  animate={{ opacity: 1, y: 0 }}
+                  className="space-y-2.5 p-4 rounded-xl border bg-background/55"
+                >
+                  <div className="flex items-center gap-2 mb-1">
+                    <Eye className="w-4 h-4 text-primary" />
+                    <span className="text-xs font-bold uppercase tracking-wider text-foreground">Select Fields to Disclose</span>
+                  </div>
+                  <p className="text-[11px] text-muted-foreground font-sans leading-relaxed">
+                    Check which metadata parameters you are comfortable showing publicly. Unselected fields are encrypted and kept hidden inside the ZK commitment.
+                  </p>
+                  
+                  {Object.keys(credentialFields).length > 0 ? (
+                    <div className="space-y-2 pt-2">
+                      {Object.entries(credentialFields).map(([fieldName, fieldValue]) => (
+                        <div 
+                          key={fieldName} 
+                          className="flex items-center gap-3 p-2.5 rounded-lg border bg-background/40 hover:bg-background/80 transition-colors"
+                        >
+                          <Checkbox
+                            id={`field-${fieldName}`}
+                            checked={selectedFields.includes(fieldName)}
+                            onCheckedChange={(checked) => {
+                              setSelectedFields(
+                                checked
+                                  ? [...selectedFields, fieldName]
+                                  : selectedFields.filter((f) => f !== fieldName)
+                              );
+                            }}
+                            data-testid={`checkbox-field-${fieldName}`}
+                          />
+                          <label htmlFor={`field-${fieldName}`} className="flex-1 flex items-center justify-between cursor-pointer">
+                            <span className="text-xs font-semibold capitalize text-foreground">{fieldName.replace(/_/g, " ")}</span>
+                            {selectedFields.includes(fieldName) ? (
+                              <Badge variant="secondary" className="text-[9px] font-bold bg-chart-3/10 text-chart-3 border-chart-3/20 no-default-active-elevate py-0 px-2 rounded-full">
+                                Reveal
+                              </Badge>
+                            ) : (
+                              <Badge variant="secondary" className="text-[9px] font-medium bg-muted text-muted-foreground border no-default-active-elevate py-0 px-2 rounded-full">
+                                Hidden
+                              </Badge>
+                            )}
+                          </label>
                         </div>
-                        <p className="font-mono text-[11px] text-muted-foreground">
-                          Proof ID: {proof.id}
-                        </p>
-                        <p className="font-mono text-[11px] text-muted-foreground">
-                          Commitment: {proof.commitment.slice(0, 24)}...
-                        </p>
-                        {proof.onChainTxHash && (
-                          <p className="font-mono text-[11px] text-muted-foreground">
-                            Tx: {proof.onChainTxHash.slice(0, 18)}...
-                          </p>
-                        )}
-                        <p className="text-xs text-muted-foreground">
-                          {new Date(proof.createdAt).toLocaleString()}
-                        </p>
-                      </div>
-                      <div className="flex flex-col gap-2">
-                        <Button
-                          variant="outline"
-                          size="sm"
-                          onClick={() => setQrProofId(proof.id)}
-                          data-testid={`button-qr-proof-${proof.id}`}
-                        >
-                          <QrCode className="w-3 h-3 mr-1" />
-                          QR
-                        </Button>
-                        <Button
-                          variant="outline"
-                          size="sm"
-                          onClick={() => copyProofId(proof.id)}
-                          data-testid={`button-copy-proof-${proof.id}`}
-                        >
-                          {copied ? <CheckCircle2 className="w-3 h-3" /> : <Copy className="w-3 h-3" />}
-                        </Button>
-                      </div>
+                      ))}
                     </div>
-                  </CardContent>
-                </Card>
-              </motion.div>
-            ))}
-          </div>
-        ) : (
-          <Card>
-            <CardContent className="py-8 text-center">
-              <ShieldCheck className="w-8 h-8 text-muted-foreground mx-auto mb-2" />
-              <p className="text-sm text-muted-foreground">No ZK proofs generated yet</p>
-              <p className="text-xs text-muted-foreground mt-1">
-                Generate a proof above to share verifiable claims without exposing data
-              </p>
+                  ) : (
+                    <p className="text-xs text-muted-foreground font-sans italic">No fields available to selectively disclose.</p>
+                  )}
+                </motion.div>
+              )}
+
+              {/* Threshold Fields */}
+              {(proofType === "range_above" || proofType === "range_below") && (
+                <motion.div 
+                  initial={{ opacity: 0, y: 10 }}
+                  animate={{ opacity: 1, y: 0 }}
+                  className="space-y-1.5"
+                >
+                  <label className="text-xs font-bold uppercase tracking-wider text-muted-foreground block">Threshold Value</label>
+                  <Input
+                    type="number"
+                    placeholder={proofType === "range_above" ? "e.g. 700" : "e.g. 40"}
+                    value={threshold}
+                    onChange={(e) => setThreshold(e.target.value)}
+                    max={
+                      proofType === "range_above" && credentialNumericValue !== null
+                        ? credentialNumericValue
+                        : undefined
+                    }
+                    min={
+                      proofType === "range_below" && credentialNumericValue !== null
+                        ? credentialNumericValue
+                        : undefined
+                    }
+                    className="rounded-xl border-border/80 focus:ring-primary/20 text-sm"
+                    data-testid="input-zk-threshold"
+                  />
+                  <p className="text-[11px] text-muted-foreground font-sans leading-relaxed">
+                    {proofType === "range_above"
+                      ? credentialNumericValue !== null
+                        ? `Prove value is ≥ ${threshold || 'this threshold'}. Your actual value satisfies this condition up to: ${credentialNumericValue}.`
+                        : "Proves your private numeric credential is at or above this threshold without revealing the exact amount."
+                      : credentialNumericValue !== null
+                        ? `Prove value is ≤ ${threshold || 'this threshold'}. Your actual value satisfies this condition from: ${credentialNumericValue} and up.`
+                        : "Proves your private numeric credential is at or below this threshold without revealing the exact amount."}
+                  </p>
+                </motion.div>
+              )}
+
+              {/* Equality Field */}
+              {proofType === "equality" && (
+                <motion.div 
+                  initial={{ opacity: 0, y: 10 }}
+                  animate={{ opacity: 1, y: 0 }}
+                  className="space-y-1.5"
+                >
+                  <label className="text-xs font-bold uppercase tracking-wider text-muted-foreground block">Target Value</label>
+                  <Input
+                    placeholder={
+                      credentialNumericValue !== null
+                        ? `Must equal ${credentialNumericValue}`
+                        : "e.g. India"
+                    }
+                    value={targetValue}
+                    onChange={(e) => setTargetValue(e.target.value)}
+                    className="rounded-xl border-border/80 focus:ring-primary/20 text-sm"
+                    data-testid="input-zk-target"
+                  />
+                  <p className="text-[11px] text-muted-foreground font-sans leading-relaxed">
+                    {credentialNumericValue !== null
+                      ? `Produces a proof demonstrating your secret value is exactly equal to the target. Must equal ${credentialNumericValue} to succeed.`
+                      : "Produces a proof demonstrating your secret value is exactly equal to this target string."}
+                  </p>
+                </motion.div>
+              )}
+
+              {/* Submit Button */}
+              <Button
+                onClick={() => generateMutation.mutate()}
+                disabled={!selectedCredential || generateMutation.isPending}
+                className="w-full h-11 text-sm font-semibold rounded-xl bg-primary hover:bg-primary/95 text-primary-foreground shadow-lg hover:shadow-primary/10 transition-all duration-300"
+                data-testid="button-generate-proof"
+              >
+                {generateMutation.isPending ? (
+                  <>
+                    <Loader2 className="w-4 h-4 mr-2 animate-spin" />
+                    Executing ZK Proof Math...
+                  </>
+                ) : (
+                  <>
+                    <Fingerprint className="w-4.5 h-4.5 mr-2" />
+                    Generate Proof
+                  </>
+                )}
+              </Button>
             </CardContent>
           </Card>
-        )}
+        </div>
+
+        {/* RIGHT COLUMN: GENERATED PROOFS HISTORICAL LIST */}
+        <div className="lg:col-span-5 space-y-4">
+          <div className="flex items-center justify-between">
+            <h2 className="font-serif text-lg font-bold flex items-center gap-1.5 text-foreground">
+              Proof History
+              <Sparkles className="w-4 h-4 text-yellow-500" />
+            </h2>
+            <Badge variant="outline" className="font-mono text-[9px] text-muted-foreground py-0.5 px-2 bg-muted/40">
+              {proofs?.length || 0} TOTAL
+            </Badge>
+          </div>
+
+          {proofsLoading ? (
+            <div className="space-y-4">
+              {[1, 2].map((i) => (
+                <Skeleton key={i} className="h-28 w-full rounded-2xl" />
+              ))}
+            </div>
+          ) : proofs && proofs.length > 0 ? (
+            <div className="space-y-4 max-h-[580px] overflow-y-auto pr-1">
+              {proofs.map((proof, i) => (
+                <motion.div
+                  key={proof.id}
+                  initial={{ opacity: 0, y: 10 }}
+                  animate={{ opacity: 1, y: 0 }}
+                  transition={{ delay: i * 0.05, ease: [0.16, 1, 0.3, 1] }}
+                >
+                  <Card 
+                    data-testid={`card-zk-proof-${proof.id}`}
+                    className="border-border/80 bg-card/45 backdrop-blur-sm glow-card-hover rounded-xl overflow-hidden"
+                  >
+                    <CardContent className="p-4 space-y-3">
+                      <div className="flex items-start justify-between gap-3">
+                        <div className="min-w-0 flex-1 space-y-1.5">
+                          <div className="flex items-center gap-1.5 flex-wrap">
+                            <span className="text-xs font-bold text-foreground">
+                              {proofTypeLabels[proof.proofType as ProofType] || proof.proofType}
+                            </span>
+                            <Badge
+                              variant="secondary"
+                              className={`text-[9px] font-bold py-0.5 px-2 rounded-full border no-default-active-elevate ${
+                                proof.verified
+                                  ? "bg-chart-3/10 text-chart-3 border-chart-3/20"
+                                  : "bg-chart-4/10 text-chart-4 border-chart-4/20"
+                              }`}
+                            >
+                              {proof.verified ? "Verified" : "Pending"}
+                            </Badge>
+                            
+                            {proof.onChainTxHash ? (
+                              <Badge
+                                variant="secondary"
+                                className="text-[9px] font-semibold bg-chart-1/10 text-chart-1 border border-chart-1/20 no-default-active-elevate cursor-pointer hover:bg-chart-1/15 flex items-center gap-0.5 rounded-full py-0 px-2"
+                                onClick={() => window.open(`https://stellar.expert/explorer/testnet/tx/${proof.onChainTxHash}`, "_blank")}
+                                data-testid={`badge-onchain-${proof.id}`}
+                              >
+                                <Link2 className="w-2.5 h-2.5" />
+                                On-Ledger
+                                <ExternalLink className="w-1.5 h-1.5" />
+                              </Badge>
+                            ) : (
+                              <Badge variant="secondary" className="text-[9px] bg-muted/65 text-muted-foreground border no-default-active-elevate py-0 px-2 rounded-full">
+                                Off-Ledger
+                              </Badge>
+                            )}
+                          </div>
+
+                          <div className="space-y-0.5 font-mono text-[10px] text-muted-foreground">
+                            <p className="truncate"><span className="text-foreground/60 font-semibold font-sans">Proof ID:</span> {proof.id}</p>
+                            <p className="truncate"><span className="text-foreground/60 font-semibold font-sans">Commitment:</span> {proof.commitment}</p>
+                            {proof.onChainTxHash && (
+                              <p className="truncate text-chart-1"><span className="text-foreground/60 font-semibold font-sans">Tx:</span> {proof.onChainTxHash}</p>
+                            )}
+                          </div>
+
+                          <p className="text-[10px] text-muted-foreground font-sans">
+                            {new Date(proof.createdAt).toLocaleString(undefined, { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' })}
+                          </p>
+                        </div>
+
+                        <div className="flex flex-col gap-2 shrink-0 self-center">
+                          <Button
+                            variant="outline"
+                            size="sm"
+                            onClick={() => setQrProofId(proof.id)}
+                            data-testid={`button-qr-proof-${proof.id}`}
+                            className="h-8 w-12 p-0 border-border/80 hover:bg-primary/5 hover:text-primary rounded-lg"
+                            title="Share Proof QR"
+                          >
+                            <QrCode className="w-3.5 h-3.5" />
+                          </Button>
+                          <Button
+                            variant="outline"
+                            size="sm"
+                            onClick={() => copyProofId(proof.id)}
+                            data-testid={`button-copy-proof-${proof.id}`}
+                            className="h-8 w-12 p-0 border-border/80 hover:bg-primary/5 hover:text-primary rounded-lg"
+                            title="Copy Proof ID"
+                          >
+                            {copied ? <Check className="w-3.5 h-3.5 text-chart-3" /> : <Copy className="w-3.5 h-3.5" />}
+                          </Button>
+                        </div>
+                      </div>
+                    </CardContent>
+                  </Card>
+                </motion.div>
+              ))}
+            </div>
+          ) : (
+            <Card className="border-dashed py-10 text-center bg-card/10 backdrop-blur-sm rounded-2xl">
+              <CardContent className="space-y-3 max-w-xs mx-auto">
+                <ShieldCheck className="w-8 h-8 text-muted-foreground mx-auto" />
+                <h3 className="font-serif text-sm font-bold">No generated proofs</h3>
+                <p className="text-xs text-muted-foreground leading-relaxed font-sans">
+                  Generate a math proof from your active credentials to publish verified conditions without exposing plaintext claims.
+                </p>
+              </CardContent>
+            </Card>
+          )}
+        </div>
+
       </div>
 
+      {/* POPUP MODAL: JUST GENERATED PROOF ID */}
       <Dialog open={proofDialogOpen} onOpenChange={setProofDialogOpen}>
-        <DialogContent className="max-w-md">
-          <DialogHeader>
-            <DialogTitle className="flex items-center gap-2">
+        <DialogContent className="max-w-md rounded-2xl border-border/80 bg-card/95 backdrop-blur-xl">
+          <DialogHeader className="border-b pb-4">
+            <DialogTitle className="flex items-center gap-2 font-serif font-bold text-lg text-foreground">
               <ShieldCheck className="w-5 h-5 text-chart-3" />
-              ZK Proof Generated
+              ZK Proof Generated!
             </DialogTitle>
           </DialogHeader>
           {generatedProof && (
-            <div className="space-y-4">
-              <div className={`p-3 rounded-md ${generatedProof.verified ? "bg-chart-3/10 border-chart-3/20" : "bg-destructive/10 border-destructive/20"} border`}>
-                <p className="text-sm font-medium">
+            <div className="space-y-4 pt-3 font-sans">
+              <div className={`p-3.5 rounded-xl ${generatedProof.verified ? "bg-chart-3/10 border-chart-3/15 text-chart-3" : "bg-destructive/10 border-destructive/15 text-destructive"} border text-xs font-semibold leading-relaxed`}>
+                <p>
                   {generatedProof.verified
-                    ? "Proof verified — your credential satisfies the condition"
-                    : "Proof generated — but your credential does NOT satisfy the condition"}
+                    ? "Cryptographic proof successfully verified locally! Your private claim fully satisfies this statement."
+                    : "Cryptographic proof generated but your private claim does NOT satisfy the requested statement."}
                 </p>
               </div>
 
-              <div className="space-y-3 text-sm">
+              <div className="space-y-3.5 text-xs">
+                
                 <div>
-                  <p className="text-xs text-muted-foreground">Proof ID (share this for verification)</p>
-                  <div className="flex items-center gap-2 mt-1">
-                    <code className="font-mono text-xs bg-muted px-2 py-1 rounded flex-1 break-all">
+                  <span className="text-[10px] font-bold text-muted-foreground uppercase tracking-widest block mb-1">Proof ID (Share with verifiers)</span>
+                  <div className="flex items-center gap-2">
+                    <code className="font-mono text-xs bg-muted/50 p-2.5 rounded-xl border flex-1 break-all font-semibold text-foreground">
                       {generatedProof.id}
                     </code>
                     <Button
-                      variant="ghost"
-                      size="sm"
+                      variant="outline"
+                      size="icon"
                       onClick={() => copyProofId(generatedProof.id)}
                       data-testid="button-copy-proof-dialog"
+                      className="rounded-xl border-border/80 h-10 w-10 shrink-0"
                     >
-                      {copied ? <CheckCircle2 className="w-4 h-4" /> : <Copy className="w-4 h-4" />}
+                      {copied ? <Check className="w-4 h-4 text-chart-3" /> : <Copy className="w-4 h-4" />}
                     </Button>
                   </div>
                 </div>
 
                 <div>
-                  <p className="text-xs text-muted-foreground">Commitment</p>
-                  <code className="font-mono text-xs break-all">{generatedProof.commitment}</code>
+                  <span className="text-[10px] font-bold text-muted-foreground uppercase tracking-widest block mb-0.5">Commitment Hash</span>
+                  <code className="font-mono text-[10px] break-all text-foreground/80">{generatedProof.commitment}</code>
                 </div>
 
-                <div>
-                  <p className="text-xs text-muted-foreground">Proof Type</p>
-                  <p className="text-sm">{proofTypeLabels[generatedProof.proofType as ProofType]}</p>
-                </div>
-
-                <div>
-                  <p className="text-xs text-muted-foreground">Protocol</p>
-                  <p className="text-sm font-mono">krydo-zkp-v1</p>
+                <div className="grid grid-cols-2 gap-3 pt-1">
+                  <div>
+                    <span className="text-[10px] font-bold text-muted-foreground uppercase tracking-widest block mb-0.5">Proof Statement</span>
+                    <span className="text-xs font-semibold">{proofTypeLabels[generatedProof.proofType as ProofType]}</span>
+                  </div>
+                  <div>
+                    <span className="text-[10px] font-bold text-muted-foreground uppercase tracking-widest block mb-0.5">Engine Protocol</span>
+                    <span className="text-xs font-mono font-bold text-primary">krydo-zkp-v1</span>
+                  </div>
                 </div>
 
                 {generatedProof?.proofType === "selective_disclosure" && generatedProof?.publicInputs?.disclosedFields && (
                   <div>
-                    <p className="text-xs text-muted-foreground mb-1">Disclosed Fields</p>
+                    <span className="text-[10px] font-bold text-muted-foreground uppercase tracking-widest block mb-1">Disclosed Fields</span>
                     <div className="flex flex-wrap gap-1">
                       {generatedProof.publicInputs.disclosedFields.map((f: string) => (
-                        <Badge key={f} variant="secondary" className="text-[10px] bg-chart-3/15 text-chart-3 no-default-active-elevate capitalize">
+                        <Badge key={f} variant="secondary" className="text-[9px] font-bold bg-chart-3/10 text-chart-3 border-chart-3/20 no-default-active-elevate capitalize rounded-full py-0 px-2">
                           <Eye className="w-2.5 h-2.5 mr-0.5" />
                           {f.replace(/_/g, " ")}
                         </Badge>
@@ -619,68 +665,67 @@ export default function ZkProofsPage() {
                 )}
               </div>
 
-              <div className="pt-2 border-t">
-                <p className="text-xs text-muted-foreground mb-2">
-                  Scan this QR to verify the proof on any device
-                </p>
+              {/* QR Code Embed */}
+              <div className="pt-3 border-t">
+                <span className="text-[10px] font-bold text-muted-foreground uppercase tracking-widest block text-center mb-3">Scan QR to Verify Instantly</span>
                 <div className="flex flex-col items-center gap-2">
-                  <div className="bg-white p-2 rounded-lg">
+                  <div className="bg-white p-3 rounded-xl shadow-md border">
                     <QrCodeCanvas
                       value={`${window.location.origin}/verify/${generatedProof.id}`}
-                      size={180}
+                      size={160}
                     />
                   </div>
-                  <code className="font-mono text-[10px] text-muted-foreground break-all text-center px-2">
+                  <code className="font-mono text-[9px] text-muted-foreground break-all text-center px-4 max-w-xs mt-1 block">
                     {`${window.location.origin}/verify/${generatedProof.id}`}
                   </code>
                 </div>
               </div>
 
-              <p className="text-xs text-muted-foreground">
-                Share the Proof ID or QR with any verifier. They can verify your claim without seeing your actual data.
+              <p className="text-[10px] text-muted-foreground leading-relaxed text-center max-w-xs mx-auto font-sans pt-1">
+                Provide the QR or Proof ID code to any verifier in the network. They will mathematically confirm the condition is valid.
               </p>
             </div>
           )}
         </DialogContent>
       </Dialog>
 
-      {/* Per-card QR share dialog. Opens when a user clicks the QR button on
-          an existing proof row — encodes the public /verify/:id URL so the
-          scanning device lands directly on a live verification view. */}
+      {/* SHARE COMPLETED PROOF QR MODAL */}
       <Dialog open={!!qrProofId} onOpenChange={(open) => !open && setQrProofId(null)}>
-        <DialogContent className="max-w-xs">
-          <DialogHeader>
-            <DialogTitle className="flex items-center gap-2">
+        <DialogContent className="max-w-xs rounded-2xl border-border/80 bg-card/95 backdrop-blur-xl">
+          <DialogHeader className="border-b pb-4">
+            <DialogTitle className="flex items-center gap-2 font-serif font-bold text-lg">
               <QrCode className="w-5 h-5 text-primary" />
               Share ZK Proof
             </DialogTitle>
           </DialogHeader>
           {qrProofId && (
-            <div className="flex flex-col items-center gap-3 py-2">
-              <div className="bg-white p-2 rounded-lg">
+            <div className="flex flex-col items-center gap-3.5 py-3 font-sans">
+              <div className="bg-white p-3 rounded-xl shadow-md border">
                 <QrCodeCanvas
                   value={`${window.location.origin}/verify/${qrProofId}`}
-                  size={220}
+                  size={200}
                 />
               </div>
-              <p className="text-xs text-muted-foreground text-center">
-                Anyone scanning this QR will land on a public verification page for this proof — no account required.
+              <p className="text-xs text-muted-foreground text-center leading-relaxed">
+                Scan this QR to open the public Krydo Verification screen for this proof on any device without logging in.
               </p>
-              <code className="font-mono text-[10px] text-muted-foreground break-all text-center px-2">
+              
+              <div className="w-full bg-muted/40 p-2.5 rounded-xl border font-mono text-[9px] text-muted-foreground break-all text-center">
                 {`${window.location.origin}/verify/${qrProofId}`}
-              </code>
+              </div>
+              
               <Button
                 variant="outline"
                 size="sm"
                 onClick={() => {
                   navigator.clipboard.writeText(`${window.location.origin}/verify/${qrProofId}`);
-                  toast({ title: "Link copied", description: "Verification URL copied to clipboard." });
+                  toast({ title: "Verification link copied", description: "Proof URL copied to clipboard." });
                 }}
-                className="w-full"
+                className="w-full font-semibold rounded-full border-border/80 hover:bg-primary/5 hover:text-primary transition-all duration-300 gap-1.5"
                 data-testid="button-copy-qr-link"
               >
-                <Copy className="w-3 h-3 mr-1" />
-                Copy Link
+                <Copy className="w-3.5 h-3.5" />
+                Copy Link String
               </Button>
             </div>
           )}
