@@ -12,7 +12,7 @@
 #   - It does NOT auto-provision the Firebase Admin SDK credential file.
 #     Paste the whole service-account JSON into FIREBASE_SERVICE_ACCOUNT.
 #     `server/config.ts` reads it directly from the env.
-#   - It does NOT cover the Sepolia contract deploy (that's a one-off
+#   - It does NOT cover the Soroban contract deploy (that's a one-off
 #     `npm run deploy:contracts` from your laptop, not part of CI).
 
 services:
@@ -54,10 +54,12 @@ services:
       - key: FIREBASE_PROJECT_ID
         sync: false
 
-      # --- Ethereum / Sepolia ---
-      - key: ALCHEMY_API_KEY
+      # --- Stellar / Soroban ---
+      - key: STELLAR_NETWORK
+        value: testnet
+      - key: SOROBAN_RPC_URL
         sync: false
-      - key: DEPLOYER_PRIVATE_KEY
+      - key: DEPLOYER_SECRET
         sync: false
 
       # --- Auth ---
@@ -77,10 +79,3 @@ services:
         value: "60000"
       - key: RATE_LIMIT_MAX
         value: "120"
-
-      # --- Client (Vite build-time only) ---
-      # WalletConnect requires a projectId from https://cloud.walletconnect.com
-      # Without this, WalletConnect is disabled and only MetaMask / Coinbase /
-      # injected connectors show up. MetaMask-only still works fine.
-      - key: VITE_WALLETCONNECT_PROJECT_ID
-        sync: false
