@@ -1,8 +1,8 @@
 {
   "$schema": "https://openapi.vercel.sh/vercel.json",
-  "buildCommand": "rm -f package-lock.json && npm install --include=optional && npm run build",
+  "buildCommand": "rm -f package-lock.json && NPM_CONFIG_PRODUCTION=false npm install --include=optional --include=dev && npm run build",
   "outputDirectory": "dist/public",
-  "installCommand": "npm install --include=optional",
+  "installCommand": "NPM_CONFIG_PRODUCTION=false npm install --include=optional --include=dev",
   "framework": null,
   "rewrites": [
     { "source": "/api/(.*)", "destination": "/api" },
