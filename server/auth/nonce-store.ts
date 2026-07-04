@@ -1,13 +1,13 @@
 import crypto from "crypto";
 
 /**
- * Short-lived nonce storage for SIWE challenges. In-memory is fine because
- * nonces are only valid for a few minutes and we gracefully handle expiry.
- * Swap to Redis later if we need horizontal scale.
+ * Short-lived nonce storage for Sign-in-with-Stellar challenges. In-memory is
+ * fine because nonces are only valid for a few minutes and we gracefully handle
+ * expiry. Swap to Redis later if we need horizontal scale.
  */
 interface NonceEntry {
   nonce: string;
-  address: string; // lowercased
+  address: string; // exact StrKey (case-sensitive)
   issuedAt: number;
   expiresAt: number;
 }
@@ -25,12 +25,12 @@ function gc(now: number) {
 }
 
 export function issueNonce(address: string): { nonce: string; expiresAt: number } {
-  const lc = address.toLowerCase();
+  const addr = address.trim();
   const nonce = crypto.randomBytes(16).toString("hex");
   const now = Date.now();
   const expiresAt = now + NONCE_TTL_MS;
   gc(now);
-  store.set(nonce, { nonce, address: lc, issuedAt: now, expiresAt });
+  store.set(nonce, { nonce, address: addr, issuedAt: now, expiresAt });
   return { nonce, expiresAt };
 }
 
@@ -43,5 +43,5 @@ export function consumeNonce(nonce: string, address: string): boolean {
   if (!entry) return false;
   store.delete(nonce);
   if (entry.expiresAt < Date.now()) return false;
-  return entry.address === address.toLowerCase();
+  return entry.address === address.trim();
 }

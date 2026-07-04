@@ -33,7 +33,7 @@ export function registerZkRoutes(app: Express) {
         ttlDays: z.number().int().min(1).max(365).optional().default(30),
         // Full-SSI flag: when true, server generates + stores the proof but
         // skips on-chain anchoring. Client is expected to call
-        // anchorZkProofViaMetaMask with the returned commitment + credentialHash,
+        // anchorZkProofViaWallet with the returned commitment + credentialHash,
         // then POST /api/zk/:id/anchor to link the tx hash.
         clientWillAnchor: z.boolean().optional(),
       });
@@ -150,7 +150,7 @@ export function registerZkRoutes(app: Express) {
       // explicitly (that endpoint still exists for backwards compat).
       //
       // Use the shared OFF_CHAIN_TX_HASH sentinel instead of a random hash
-      // so the UI can deterministically suppress the Etherscan link (a
+      // so the UI can deterministically suppress the explorer link (a
       // random hash would 404 when clicked). data.onChain === false is the
       // canonical flag; the sentinel is a secondary safety net.
       const tx = await storage.createTransaction({
@@ -191,7 +191,7 @@ export function registerZkRoutes(app: Express) {
    * Link a client-signed anchor tx to an already-generated ZK proof.
    * Used by the Full-SSI flow: the holder's wallet signs a self-tx with
    * encoded KRYDO_ZK_PROOF_V1 payload, then POSTs the tx hash here so the
-   * server can verify the Sepolia receipt and mark the proof as anchored.
+   * server can verify the Stellar transaction result and mark the proof anchored.
    *
    * Only the prover (who created the proof) or root can call this.
    */
@@ -202,8 +202,8 @@ export function registerZkRoutes(app: Express) {
       if (!txHash || typeof txHash !== "string") {
         return res.status(400).json({ message: "txHash is required" });
       }
-      if (!/^0x[0-9a-f]{64}$/i.test(txHash)) {
-        return res.status(400).json({ message: "txHash is not a valid Ethereum transaction hash" });
+      if (!/^[0-9a-f]{64}$/i.test(txHash)) {
+        return res.status(400).json({ message: "txHash is not a valid Stellar transaction hash" });
       }
 
       const proof = await storage.getZkProof(id);
@@ -224,14 +224,14 @@ export function registerZkRoutes(app: Express) {
           .json({ message: "Blockchain provider not configured on this server" });
       }
 
-      // Verify the client-signed tx actually landed on Sepolia. We reuse
-      // the same receipt-polling helper as the credential PATCH path.
+      // Verify the client-signed tx actually landed on Stellar. We reuse
+      // the same result-polling helper as the credential PATCH path.
       const { waitForClientTx } = await import("../blockchain");
       const result = await waitForClientTx(txHash, { timeoutMs: 45_000 });
       if (result.status === "unknown") {
         return res.status(422).json({
           message:
-            "Anchor tx not found on Sepolia. Please retry signing — your wallet may be on a different chain.",
+            "Anchor tx not found on Stellar. Please retry signing — your wallet may be on a different network.",
           status: result.status,
         });
       }
@@ -260,7 +260,7 @@ export function registerZkRoutes(app: Express) {
 
       log.info(
         { proofId: id, txHash, status: result.status },
-        "ZK proof anchored on-chain (MetaMask)",
+        "ZK proof anchored on-chain (wallet)",
       );
 
       res.json({

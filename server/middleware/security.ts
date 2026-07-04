@@ -3,6 +3,7 @@ import helmet from "helmet";
 import cors from "cors";
 import rateLimit from "express-rate-limit";
 import { config } from "../config";
+import { SOROBAN_RPC_URL, HORIZON_URL } from "@shared/contracts";
 
 /**
  * Installs a defense-in-depth stack of HTTP security middleware.
@@ -28,15 +29,17 @@ export function installSecurityMiddleware(app: Express) {
               "img-src": ["'self'", "data:", "blob:"],
               "connect-src": [
                 "'self'",
-                "https://eth-sepolia.g.alchemy.com",
-                "https://*.alchemy.com",
-                "https://*.infura.io",
+                SOROBAN_RPC_URL,
+                HORIZON_URL,
+                "https://*.stellar.org",
+                "https://horizon-testnet.stellar.org",
+                "https://soroban-testnet.stellar.org",
               ],
               "frame-ancestors": ["'none'"],
             },
           }
         : false,
-      crossOriginEmbedderPolicy: false, // would break MetaMask injected provider
+      crossOriginEmbedderPolicy: false, // would break the wallet extension provider
     }),
   );
 

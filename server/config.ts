@@ -15,11 +15,15 @@ const EnvSchema = z.object({
   FIREBASE_SERVICE_ACCOUNT: z.string().min(1).optional(),
   FIREBASE_PROJECT_ID: z.string().min(1).optional(),
 
-  // --- Blockchain (Sepolia) ---
-  ALCHEMY_API_KEY: z.string().min(1, "ALCHEMY_API_KEY is required"),
-  DEPLOYER_PRIVATE_KEY: z
+  // --- Blockchain (Stellar / Soroban) ---
+  // Soroban RPC endpoint. Optional: falls back to deployment.json's rpcUrl.
+  SOROBAN_RPC_URL: z.string().url().optional(),
+  // Root/deployer secret key in StrKey form (S...). Optional: when absent the
+  // server runs in off-chain mode (no on-chain anchoring).
+  DEPLOYER_SECRET: z
     .string()
-    .regex(/^(0x)?[0-9a-fA-F]{64}$/, "DEPLOYER_PRIVATE_KEY must be a 32-byte hex string"),
+    .regex(/^S[A-Z2-7]{55}$/, "DEPLOYER_SECRET must be a Stellar secret key (S...)")
+    .optional(),
 
   // --- Auth / sessions ---
   SESSION_SECRET: z.string().min(32, "SESSION_SECRET must be at least 32 characters").default(

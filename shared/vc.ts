@@ -15,8 +15,8 @@
  *
  * What we map:
  *   - `id` → `id` (urn:uuid:…)
- *   - `issuerAddress` → `issuer.id` (`did:ethr:...` on Sepolia)
- *   - `holderAddress` → `credentialSubject.id` (did:ethr)
+ *   - `issuerAddress` → `issuer.id` (`did:pkh:stellar:...`)
+ *   - `holderAddress` → `credentialSubject.id` (did:pkh:stellar)
  *   - `claimType` → contributes to `type` array + is the key inside subject
  *   - `claimData` → placed at `credentialSubject[claimType]`
  *   - `issuedAt` → `validFrom`
@@ -28,11 +28,13 @@
  * a full cryptographic VC proof suite (like DataIntegrityProof). A
  * verifier consumes the on-chain anchor to confirm issuance; this is
  * strictly stronger than a JSON-LD signature for our use case because the
- * anchor is stored in Ethereum. The anchor hash IS the credential hash.
+ * anchor is stored on Stellar. The anchor hash IS the credential hash.
  *
  * Callers that need a standard cryptographic VC proof can run the
  * returned VC through their own signing pipeline.
  */
+
+import { STELLAR_NETWORK } from "./contracts";
 
 export interface KrydoCredentialLike {
   id: string;
@@ -78,7 +80,8 @@ export interface VerifiableCredentialV2 {
     verificationMethod: string;
     proofPurpose: "assertionMethod";
     anchor: {
-      chain: "eip155:11155111";
+      /** CAIP-2 chain id, e.g. `stellar:testnet` / `stellar:pubnet`. */
+      chain: string;
       authority: string;
       credentialHash: string;
     };
@@ -89,13 +92,27 @@ export interface VerifiableCredentialV2 {
 const KRYDO_CONTEXT = "https://krydo.dev/credentials/v1";
 const W3C_VC_V2 = "https://www.w3.org/ns/credentials/v2";
 
+/** Map a Krydo network name to the CAIP-2 Stellar chain reference. */
+function caip2ChainRef(network: string): string {
+  if (network === "mainnet" || network === "public" || network === "pubnet") {
+    return "pubnet";
+  }
+  if (network === "futurenet") return "futurenet";
+  return "testnet";
+}
+
+const CHAIN_REF = caip2ChainRef(STELLAR_NETWORK);
+/** CAIP-2 chain id for the active network. */
+const CAIP2_CHAIN = `stellar:${CHAIN_REF}`;
+
 function toIso(d: Date | string): string {
   return d instanceof Date ? d.toISOString() : new Date(d).toISOString();
 }
 
 function didFromAddress(addr: string): string {
-  // did:ethr on Sepolia. Lower-case the hex so this is deterministic.
-  return `did:ethr:sepolia:${addr.toLowerCase()}`;
+  // did:pkh over CAIP-10 for Stellar. StrKey addresses are case-sensitive, so
+  // we never normalise case.
+  return `did:pkh:stellar:${CHAIN_REF}:${addr}`;
 }
 
 function pascalCase(s: string): string {
@@ -185,7 +202,7 @@ export function credentialToVC(
       verificationMethod: `${issuerDid}#controller`,
       proofPurpose: "assertionMethod",
       anchor: {
-        chain: "eip155:11155111", // CAIP-2 for Sepolia
+        chain: CAIP2_CHAIN, // CAIP-2 for the active Stellar network
         authority: cred.issuerAddress,
         credentialHash: cred.credentialHash,
       },

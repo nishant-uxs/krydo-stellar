@@ -1,120 +1,216 @@
-import { ethers } from "ethers";
+import crypto from "node:crypto";
+import {
+  rpc,
+  Keypair,
+  Contract,
+  Address,
+  TransactionBuilder,
+  nativeToScVal,
+  scValToNative,
+  xdr,
+  BASE_FEE,
+} from "@stellar/stellar-sdk";
 import {
   DEPLOYMENT,
-  AUTHORITY_ADDRESS,
-  CREDENTIALS_ADDRESS,
-  AUDIT_ADDRESS,
-  AUTHORITY_ABI,
-  CREDENTIALS_ABI,
-  AUDIT_ABI,
+  AUTHORITY_ID,
+  CREDENTIALS_ID,
+  AUDIT_ID,
+  NETWORK_PASSPHRASE,
+  SOROBAN_RPC_URL,
   type DeploymentInfo,
 } from "@shared/contracts";
 
 /**
- * Thin wrapper around the Sepolia RPC. Every on-chain operation returns both
- * the transaction hash AND the real block number from the mined receipt so the
- * storage layer never has to fabricate placeholder values.
+ * Thin wrapper around the Soroban RPC. Every state-changing operation returns
+ * both the transaction hash AND the ledger sequence from the confirmed result,
+ * so the storage layer never has to fabricate placeholder values.
  *
- * Contract addresses + ABIs come from `@shared/contracts`, which is itself
+ * Contract ids + network params come from `@shared/contracts`, which is itself
  * generated from `contracts/deployment.json` at build/startup time. The same
- * constants are consumed by the React client so server and browser can never
- * drift apart on which contract they're talking to.
+ * constants are consumed by the React client (Freighter signer) so server and
+ * browser can never drift apart on which contracts they're talking to.
+ *
+ * When `DEPLOYER_SECRET` or the contract ids are missing the module stays in
+ * off-chain mode: `isBlockchainReady()` returns false and callers skip
+ * anchoring entirely.
  */
 
 export interface OnChainResult {
   txHash: string;
+  /** Soroban ledger sequence, kept as a string for API stability. */
   blockNumber: string;
 }
 
-let provider: ethers.JsonRpcProvider;
-let wallet: ethers.Wallet;
-let authorityContract: ethers.Contract;
-let credentialsContract: ethers.Contract;
-let auditContract: ethers.Contract | null = null;
+let server: rpc.Server | undefined;
+let sourceKeypair: Keypair | undefined;
 let deployment: DeploymentInfo | undefined;
 
-export function getProvider() {
-  return provider;
+export function getServer() {
+  return server;
 }
 
-export function getWallet() {
-  return wallet;
-}
-
-export function getAuthorityContract() {
-  return authorityContract;
-}
-
-export function getCredentialsContract() {
-  return credentialsContract;
+export function getSourceKeypair() {
+  return sourceKeypair;
 }
 
 export function getDeployment() {
   return deployment;
 }
 
-export async function initBlockchain() {
-  const alchemyKey = process.env.ALCHEMY_API_KEY;
-  const privateKey = process.env.DEPLOYER_PRIVATE_KEY;
+export async function initBlockchain(): Promise<boolean> {
+  const secret = process.env.DEPLOYER_SECRET;
+  const rpcUrl = process.env.SOROBAN_RPC_URL || SOROBAN_RPC_URL;
 
-  if (!alchemyKey || !privateKey) {
-    console.warn("Blockchain keys not configured. Running in off-chain mode.");
+  if (!secret) {
+    console.warn("DEPLOYER_SECRET not configured. Running in off-chain mode.");
     return false;
   }
-
-  if (!AUTHORITY_ADDRESS || !CREDENTIALS_ADDRESS) {
-    console.warn("Shared deployment metadata is missing contract addresses. Off-chain mode.");
+  if (!AUTHORITY_ID || !CREDENTIALS_ID) {
+    console.warn("Deployment metadata is missing contract ids. Off-chain mode.");
+    return false;
+  }
+  if (!rpcUrl) {
+    console.warn("No Soroban RPC URL configured. Off-chain mode.");
     return false;
   }
 
   deployment = DEPLOYMENT;
+  // allowHttp only matters for local/standalone http endpoints.
+  server = new rpc.Server(rpcUrl, { allowHttp: rpcUrl.startsWith("http://") });
+  sourceKeypair = Keypair.fromSecret(secret);
 
-  const rpcUrl = alchemyKey.startsWith("http")
-    ? alchemyKey
-    : `https://eth-sepolia.g.alchemy.com/v2/${alchemyKey}`;
-
-  provider = new ethers.JsonRpcProvider(rpcUrl);
-  wallet = new ethers.Wallet(privateKey, provider);
-
-  authorityContract = new ethers.Contract(AUTHORITY_ADDRESS, AUTHORITY_ABI, wallet);
-  credentialsContract = new ethers.Contract(CREDENTIALS_ADDRESS, CREDENTIALS_ABI, wallet);
-
-  // Audit contract is optional: server falls back to self-tx anchoring when
-  // AUDIT_ADDRESS is empty (pre-deploy-audit state).
-  if (AUDIT_ADDRESS) {
-    auditContract = new ethers.Contract(AUDIT_ADDRESS, AUDIT_ABI, wallet);
-  }
-
-  console.log(`Blockchain initialized. Root: ${wallet.address}`);
-  console.log(`Authority contract: ${AUTHORITY_ADDRESS}`);
-  console.log(`Credentials contract: ${CREDENTIALS_ADDRESS}`);
-  console.log(`Audit contract: ${AUDIT_ADDRESS || "(not deployed — using legacy self-tx anchors)"}`);
+  console.log(`Soroban initialized. Root: ${sourceKeypair.publicKey()}`);
+  console.log(`Network: ${deployment.network} (${rpcUrl})`);
+  console.log(`Authority contract: ${AUTHORITY_ID}`);
+  console.log(`Credentials contract: ${CREDENTIALS_ID}`);
+  console.log(`Audit contract: ${AUDIT_ID || "(not deployed — anchoring disabled)"}`);
   return true;
 }
 
-export function getAuditContract() {
-  return auditContract;
+export function isBlockchainReady(): boolean {
+  return !!server && !!sourceKeypair && !!AUTHORITY_ID && !!CREDENTIALS_ID;
 }
 
-function resultOf(receipt: ethers.TransactionReceipt | null | undefined): OnChainResult {
-  if (!receipt) throw new Error("tx receipt missing");
-  return {
-    txHash: receipt.hash,
-    blockNumber: String(receipt.blockNumber),
-  };
+// ---------- low-level helpers ----------
+
+function requireReady(): { server: rpc.Server; source: Keypair } {
+  if (!server || !sourceKeypair) throw new Error("Blockchain not initialized");
+  return { server, source: sourceKeypair };
 }
+
+const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
+
+/** Build, simulate, sign, submit and confirm a contract invocation. */
+async function invokeSigned(
+  contractId: string,
+  method: string,
+  args: xdr.ScVal[],
+  opts: { timeoutMs?: number } = {},
+): Promise<OnChainResult> {
+  const { server, source } = requireReady();
+  const { timeoutMs = 30_000 } = opts;
+
+  const account = await server.getAccount(source.publicKey());
+  const contract = new Contract(contractId);
+  const tx = new TransactionBuilder(account, {
+    fee: BASE_FEE,
+    networkPassphrase: NETWORK_PASSPHRASE,
+  })
+    .addOperation(contract.call(method, ...args))
+    .setTimeout(30)
+    .build();
+
+  // prepareTransaction runs simulation and assembles the Soroban footprint.
+  const prepared = await server.prepareTransaction(tx);
+  prepared.sign(source);
+
+  const sent = await server.sendTransaction(prepared);
+  if (sent.status === "ERROR") {
+    throw new Error(`sendTransaction failed: ${JSON.stringify(sent.errorResult)}`);
+  }
+
+  const deadline = Date.now() + timeoutMs;
+  let got = await server.getTransaction(sent.hash);
+  while (
+    got.status === rpc.Api.GetTransactionStatus.NOT_FOUND &&
+    Date.now() < deadline
+  ) {
+    await sleep(1000);
+    got = await server.getTransaction(sent.hash);
+  }
+
+  if (got.status !== rpc.Api.GetTransactionStatus.SUCCESS) {
+    throw new Error(`Transaction ${sent.hash} not successful: ${got.status}`);
+  }
+  return { txHash: sent.hash, blockNumber: String(got.ledger) };
+}
+
+/** Simulate a read-only view call and decode the return value. */
+async function simulateRead<T>(
+  contractId: string,
+  method: string,
+  args: xdr.ScVal[],
+): Promise<T> {
+  const { server, source } = requireReady();
+  const account = await server.getAccount(source.publicKey());
+  const contract = new Contract(contractId);
+  const tx = new TransactionBuilder(account, {
+    fee: BASE_FEE,
+    networkPassphrase: NETWORK_PASSPHRASE,
+  })
+    .addOperation(contract.call(method, ...args))
+    .setTimeout(30)
+    .build();
+
+  const sim = await server.simulateTransaction(tx);
+  if (rpc.Api.isSimulationError(sim)) {
+    throw new Error(`Simulation error: ${sim.error}`);
+  }
+  const retval = sim.result?.retval;
+  if (!retval) throw new Error(`No return value from ${method}`);
+  return scValToNative(retval) as T;
+}
+
+// ---------- ScVal argument builders ----------
+
+function addrArg(address: string): xdr.ScVal {
+  return new Address(address).toScVal();
+}
+function strArg(s: string): xdr.ScVal {
+  return nativeToScVal(s, { type: "string" });
+}
+function symArg(s: string): xdr.ScVal {
+  return nativeToScVal(s, { type: "symbol" });
+}
+function bytes32Arg(hex: string): xdr.ScVal {
+  const clean = hex.startsWith("0x") ? hex.slice(2) : hex;
+  return xdr.ScVal.scvBytes(Buffer.from(clean, "hex"));
+}
+function bytesArg(buf: Buffer): xdr.ScVal {
+  return xdr.ScVal.scvBytes(buf);
+}
+
+/** Deterministic 32-byte id from a free-form string (sha256). */
+function id32(s: string): Buffer {
+  return crypto.createHash("sha256").update(s).digest();
+}
+
+// ---------- KrydoAuthority ----------
 
 export async function addIssuerOnChain(address: string, name: string): Promise<OnChainResult> {
-  if (!authorityContract) throw new Error("Blockchain not initialized");
-  const tx = await authorityContract.addIssuer(address, name);
-  return resultOf(await tx.wait());
+  return invokeSigned(AUTHORITY_ID, "add_issuer", [addrArg(address), strArg(name)]);
 }
 
 export async function revokeIssuerOnChain(address: string): Promise<OnChainResult> {
-  if (!authorityContract) throw new Error("Blockchain not initialized");
-  const tx = await authorityContract.revokeIssuer(address);
-  return resultOf(await tx.wait());
+  return invokeSigned(AUTHORITY_ID, "revoke_issuer", [addrArg(address)]);
 }
+
+export async function isIssuerOnChain(address: string): Promise<boolean> {
+  if (!isBlockchainReady()) return false;
+  return simulateRead<boolean>(AUTHORITY_ID, "is_issuer", [addrArg(address)]);
+}
+
+// ---------- KrydoCredentials ----------
 
 export async function issueCredentialOnChain(
   credentialHash: string,
@@ -122,130 +218,82 @@ export async function issueCredentialOnChain(
   claimType: string,
   claimSummary: string,
 ): Promise<OnChainResult> {
-  if (!credentialsContract) throw new Error("Blockchain not initialized");
-  const hashBytes = ethers.zeroPadValue(credentialHash, 32);
-  const tx = await credentialsContract.issueCredential(
-    hashBytes,
-    holderAddress,
-    claimType,
-    claimSummary,
-  );
-  return resultOf(await tx.wait());
+  const { source } = requireReady();
+  return invokeSigned(CREDENTIALS_ID, "issue_credential", [
+    addrArg(source.publicKey()),
+    bytes32Arg(credentialHash),
+    addrArg(holderAddress),
+    strArg(claimType),
+    strArg(claimSummary),
+  ]);
 }
 
 export async function revokeCredentialOnChain(credentialHash: string): Promise<OnChainResult> {
-  if (!credentialsContract) throw new Error("Blockchain not initialized");
-  const hashBytes = ethers.zeroPadValue(credentialHash, 32);
-  const tx = await credentialsContract.revokeCredential(hashBytes);
-  return resultOf(await tx.wait());
+  const { source } = requireReady();
+  return invokeSigned(CREDENTIALS_ID, "revoke_credential", [
+    addrArg(source.publicKey()),
+    bytes32Arg(credentialHash),
+  ]);
+}
+
+interface RawVerifyResult {
+  valid: boolean;
+  issuer: string;
+  holder: string;
+  claim_type: string;
+  claim_summary: string;
+  issued_at: bigint | number;
+  issuer_active: boolean;
 }
 
 export async function verifyCredentialOnChain(credentialHash: string) {
-  if (!credentialsContract) throw new Error("Blockchain not initialized");
-  const hashBytes = ethers.zeroPadValue(credentialHash, 32);
-  const result = await credentialsContract.verifyCredential(hashBytes);
+  const result = await simulateRead<RawVerifyResult | null>(
+    CREDENTIALS_ID,
+    "verify_credential",
+    [bytes32Arg(credentialHash)],
+  );
+  if (!result) {
+    return {
+      valid: false,
+      issuer: "",
+      holder: "",
+      claimType: "",
+      claimSummary: "",
+      issuedAt: 0,
+      issuerActive: false,
+    };
+  }
   return {
-    valid: result[0],
-    issuer: result[1],
-    holder: result[2],
-    claimType: result[3],
-    claimSummary: result[4],
-    issuedAt: Number(result[5]),
-    issuerActive: result[6],
+    valid: result.valid,
+    issuer: result.issuer,
+    holder: result.holder,
+    claimType: result.claim_type,
+    claimSummary: result.claim_summary,
+    issuedAt: Number(result.issued_at),
+    issuerActive: result.issuer_active,
   };
 }
 
-/**
- * Fetch the receipt for a client-submitted tx hash. Used by the PATCH
- * /api/credentials/:id/tx flow: the user's MetaMask broadcasts the issuance
- * tx and reports the hash to us, but we can't trust that blindly — if the
- * tx was sent to the wrong chain, reverted, or dropped from the mempool, we
- * must not record it as a confirmed anchor.
- *
- * Returns:
- *   { status: "confirmed", blockNumber } — tx is on-chain AND succeeded
- *   { status: "reverted", blockNumber }  — tx is on-chain but reverted
- *   { status: "pending" }                 — tx is known to the node but not mined
- *   { status: "unknown" }                 — RPC has never seen this hash
- *
- * Callers should only treat "confirmed" as a valid on-chain anchor.
- */
-export async function waitForClientTx(
-  txHash: string,
-  opts: { timeoutMs?: number; confirmations?: number } = {},
-): Promise<
-  | { status: "confirmed"; blockNumber: string }
-  | { status: "reverted"; blockNumber: string }
-  | { status: "pending" }
-  | { status: "unknown" }
-> {
-  if (!provider) throw new Error("Blockchain not initialized");
-  const { timeoutMs = 60_000, confirmations = 1 } = opts;
+// ---------- KrydoAudit ----------
 
-  const tx = await provider.getTransaction(txHash);
-  if (!tx) return { status: "unknown" };
-
-  // Already mined — fetch receipt directly.
-  if (tx.blockNumber) {
-    const receipt = await provider.getTransactionReceipt(txHash);
-    if (!receipt) return { status: "pending" };
-    return {
-      status: receipt.status === 1 ? "confirmed" : "reverted",
-      blockNumber: String(receipt.blockNumber),
-    };
-  }
-
-  // Still pending — wait up to timeoutMs for confirmation.
-  try {
-    const receipt = await provider.waitForTransaction(
-      txHash,
-      confirmations,
-      timeoutMs,
-    );
-    if (!receipt) return { status: "pending" };
-    return {
-      status: receipt.status === 1 ? "confirmed" : "reverted",
-      blockNumber: String(receipt.blockNumber),
-    };
-  } catch {
-    // ethers throws on timeout — surface as pending so caller can retry later.
-    return { status: "pending" };
-  }
+function requireAudit(): string {
+  if (!AUDIT_ID) throw new Error("KrydoAudit contract is not deployed");
+  return AUDIT_ID;
 }
 
-/**
- * Route an anchor payload to whichever sink is available:
- *   - If KrydoAudit is deployed, call `auditContract.anchor(kind, id, data)`.
- *     This is a proper contract tx that MetaMask (and any wallet) will
- *     happily sign, and it lives as an `Anchor` event indexed by kind + id.
- *   - Otherwise, fall back to the legacy EOA-self-tx-with-data approach,
- *     which still works for server-signed anchors since ethers.Wallet
- *     bypasses MetaMask's UI policy.
- */
 async function sendAnchor(
-  kindTag: string,
-  idBytes32: string,
-  data: string,
+  kind: string,
+  id: Buffer,
+  data: Buffer,
 ): Promise<OnChainResult> {
-  if (!wallet || !provider) throw new Error("Blockchain not initialized");
-  if (auditContract) {
-    const kindHash = ethers.id(kindTag);
-    const tx = await auditContract.anchor(kindHash, idBytes32, data);
-    return resultOf(await tx.wait());
-  }
-  // Legacy self-tx fallback — only works for server-signed anchors because
-  // MetaMask blocks EOA->EOA transactions that carry a data payload.
-  const tx = await wallet.sendTransaction({
-    to: wallet.address,
-    data,
-    value: 0,
-  });
-  return resultOf(await tx.wait());
-}
-
-function idFromString(s: string): string {
-  // Pack a free-form off-chain id into a bytes32 id via keccak256.
-  return ethers.id(s);
+  const auditId = requireAudit();
+  const { source } = requireReady();
+  return invokeSigned(auditId, "anchor", [
+    addrArg(source.publicKey()),
+    symArg(kind),
+    bytesArg(id),
+    bytesArg(data),
+  ]);
 }
 
 export async function anchorRoleAssignmentOnChain(
@@ -253,16 +301,11 @@ export async function anchorRoleAssignmentOnChain(
   role: string,
   label: string,
 ): Promise<OnChainResult> {
-  const encoder = new ethers.AbiCoder();
-  const data = encoder.encode(
-    ["address", "string", "string", "uint256"],
-    [walletAddress, role, label, Math.floor(Date.now() / 1000)],
+  const data = Buffer.from(
+    JSON.stringify({ walletAddress, role, label, ts: Math.floor(Date.now() / 1000) }),
+    "utf8",
   );
-  return sendAnchor(
-    "KRYDO_ROLE_ASSIGN_V1",
-    ethers.zeroPadValue(walletAddress, 32),
-    data,
-  );
+  return sendAnchor("role", id32(walletAddress), data);
 }
 
 export async function anchorCredentialRequestOnChain(
@@ -271,18 +314,17 @@ export async function anchorCredentialRequestOnChain(
   claimType: string,
   action: string,
 ): Promise<OnChainResult> {
-  const encoder = new ethers.AbiCoder();
-  const data = encoder.encode(
-    ["string", "address", "string", "string", "uint256"],
-    [
+  const data = Buffer.from(
+    JSON.stringify({
       requestId,
       requesterAddress,
       claimType,
       action,
-      Math.floor(Date.now() / 1000),
-    ],
+      ts: Math.floor(Date.now() / 1000),
+    }),
+    "utf8",
   );
-  return sendAnchor("KRYDO_CRED_REQUEST_V1", idFromString(requestId), data);
+  return sendAnchor("credreq", id32(requestId), data);
 }
 
 export async function anchorCredentialRenewalOnChain(
@@ -290,28 +332,60 @@ export async function anchorCredentialRenewalOnChain(
   holderAddress: string,
   newExpiresAt: number,
 ): Promise<OnChainResult> {
-  const encoder = new ethers.AbiCoder();
-  const data = encoder.encode(
-    ["bytes32", "address", "uint256", "uint256"],
-    [
-      ethers.zeroPadValue(credentialHash, 32),
+  const data = Buffer.from(
+    JSON.stringify({
+      credentialHash,
       holderAddress,
       newExpiresAt,
-      Math.floor(Date.now() / 1000),
-    ],
+      ts: Math.floor(Date.now() / 1000),
+    }),
+    "utf8",
   );
-  return sendAnchor(
-    "KRYDO_CRED_RENEWAL_V1",
-    ethers.zeroPadValue(credentialHash, 32),
-    data,
-  );
+  const clean = credentialHash.startsWith("0x") ? credentialHash.slice(2) : credentialHash;
+  return sendAnchor("renewal", Buffer.from(clean, "hex"), data);
 }
 
-export async function isIssuerOnChain(address: string): Promise<boolean> {
-  if (!authorityContract) return false;
-  return authorityContract.isIssuer(address);
-}
+/**
+ * Inspect a client-submitted (Freighter-signed) transaction hash. The client's
+ * wallet broadcasts the invocation and reports the hash; we must independently
+ * confirm it succeeded before recording it as a valid on-chain anchor.
+ *
+ * Returns:
+ *   { status: "confirmed", blockNumber } — tx applied successfully
+ *   { status: "reverted", blockNumber }  — tx failed on-chain
+ *   { status: "pending" }                 — RPC knows the tx but it's not final
+ *   { status: "unknown" }                 — RPC has never seen this hash
+ */
+export async function waitForClientTx(
+  txHash: string,
+  opts: { timeoutMs?: number } = {},
+): Promise<
+  | { status: "confirmed"; blockNumber: string }
+  | { status: "reverted"; blockNumber: string }
+  | { status: "pending" }
+  | { status: "unknown" }
+> {
+  const { server } = requireReady();
+  const { timeoutMs = 45_000 } = opts;
 
-export function isBlockchainReady(): boolean {
-  return !!authorityContract && !!credentialsContract;
+  const deadline = Date.now() + timeoutMs;
+  let got = await server.getTransaction(txHash);
+  while (
+    got.status === rpc.Api.GetTransactionStatus.NOT_FOUND &&
+    Date.now() < deadline
+  ) {
+    await sleep(1500);
+    got = await server.getTransaction(txHash);
+  }
+
+  switch (got.status) {
+    case rpc.Api.GetTransactionStatus.SUCCESS:
+      return { status: "confirmed", blockNumber: String(got.ledger) };
+    case rpc.Api.GetTransactionStatus.FAILED:
+      return { status: "reverted", blockNumber: String(got.ledger) };
+    case rpc.Api.GetTransactionStatus.NOT_FOUND:
+      return { status: "unknown" };
+    default:
+      return { status: "pending" };
+  }
 }

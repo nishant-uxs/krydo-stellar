@@ -1,13 +1,16 @@
 import { describe, it, expect } from "vitest";
 import { credentialToVC, type KrydoCredentialLike } from "./vc";
 
+// Real-format Stellar StrKey addresses (case-sensitive).
+const ISSUER_ADDR = "GDQOE23CFSUMSVQK4Y5JHPPYK73VYCNHZHA7ENKCV37P6SUEO6XQBKPP";
+const HOLDER_ADDR = "GBRPYHIL2CI3FNQ4BXLFMNDLFJUNPU2HY3ZMFSHONUCEOASW7QC7OX2H";
+
 function baseCred(over: Partial<KrydoCredentialLike> = {}): KrydoCredentialLike {
   return {
     id: "11111111-1111-4111-8111-111111111111",
-    credentialHash:
-      "0x" + "ab".repeat(32), // 32 bytes
-    issuerAddress: "0xABCDEF0123456789ABCDEF0123456789ABCDEF01",
-    holderAddress: "0x1111222233334444555566667777888899990000",
+    credentialHash: "ab".repeat(32), // 32 bytes, bare hex
+    issuerAddress: ISSUER_ADDR,
+    holderAddress: HOLDER_ADDR,
     claimType: "credit_score",
     claimSummary: "CIBIL score above 750",
     claimData: { min: 750, max: 900, currency: "N/A" },
@@ -46,11 +49,9 @@ describe("credentialToVC (W3C VC Data Model v2)", () => {
     expect(vc.type[1]).toBe("KrydoIncomeVerificationCredential");
   });
 
-  it("issuer.id is a did:ethr:sepolia with lowercase address", () => {
+  it("issuer.id is a did:pkh:stellar with the exact StrKey address", () => {
     const vc = credentialToVC(baseCred());
-    expect(vc.issuer.id).toBe(
-      "did:ethr:sepolia:0xabcdef0123456789abcdef0123456789abcdef01",
-    );
+    expect(vc.issuer.id).toBe(`did:pkh:stellar:testnet:${ISSUER_ADDR}`);
   });
 
   it("includes issuer.name when provided", () => {
@@ -63,11 +64,9 @@ describe("credentialToVC (W3C VC Data Model v2)", () => {
     expect(vc.issuer).not.toHaveProperty("name");
   });
 
-  it("credentialSubject.id is the holder's did:ethr", () => {
+  it("credentialSubject.id is the holder's did:pkh:stellar", () => {
     const vc = credentialToVC(baseCred());
-    expect(vc.credentialSubject.id).toBe(
-      "did:ethr:sepolia:0x1111222233334444555566667777888899990000",
-    );
+    expect(vc.credentialSubject.id).toBe(`did:pkh:stellar:testnet:${HOLDER_ADDR}`);
   });
 
   it("nests claimData under credentialSubject[claimType]", () => {
@@ -137,19 +136,19 @@ describe("credentialToVC (W3C VC Data Model v2)", () => {
     );
   });
 
-  it("proof anchors to the credential hash with CAIP-2 Sepolia chain id", () => {
+  it("proof anchors to the credential hash with CAIP-2 Stellar chain id", () => {
     const vc = credentialToVC(baseCred());
     expect(vc.proof.type).toBe("KrydoOnChainAnchor2025");
-    expect(vc.proof.anchor.chain).toBe("eip155:11155111");
-    expect(vc.proof.anchor.credentialHash).toBe("0x" + "ab".repeat(32));
-    expect(vc.proof.proofValue).toBe("0x" + "ab".repeat(32));
+    expect(vc.proof.anchor.chain).toBe("stellar:testnet");
+    expect(vc.proof.anchor.credentialHash).toBe("ab".repeat(32));
+    expect(vc.proof.proofValue).toBe("ab".repeat(32));
     expect(vc.proof.proofPurpose).toBe("assertionMethod");
   });
 
   it("verificationMethod references issuer DID's controller key", () => {
     const vc = credentialToVC(baseCred());
     expect(vc.proof.verificationMethod).toBe(
-      "did:ethr:sepolia:0xabcdef0123456789abcdef0123456789abcdef01#controller",
+      `did:pkh:stellar:testnet:${ISSUER_ADDR}#controller`,
     );
   });
 

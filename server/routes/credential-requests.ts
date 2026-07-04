@@ -23,7 +23,7 @@ export function registerCredentialRequestRoutes(app: Express) {
   app.post("/api/credential-requests", requireAuth, sensitiveLimiter, async (req, res) => {
     try {
       // Full-SSI flag: if true, server creates the request off-chain and
-      // the holder's wallet will sign its own audit anchor via MetaMask
+      // the holder's wallet will sign its own audit anchor via the wallet
       // and link it via POST /api/credential-requests/:id/anchor.
       const { clientWillAnchor, ...rest } = req.body ?? {};
       const body = { ...rest, requesterAddress: req.auth!.sub };
@@ -62,7 +62,7 @@ export function registerCredentialRequestRoutes(app: Express) {
       }
 
       await storage.createTransaction({
-        txHash: onChainTxHash || "0x" + crypto.randomBytes(32).toString("hex"),
+        txHash: onChainTxHash || crypto.randomBytes(32).toString("hex"),
         action: "credential_requested",
         fromAddress: data.requesterAddress,
         toAddress: data.issuerAddress || null,
@@ -92,7 +92,7 @@ export function registerCredentialRequestRoutes(app: Express) {
    * Link a client-signed audit-anchor tx to a credential request. Used by
    * the Full-SSI request-creation flow: holder's wallet signs a self-tx
    * with encoded KRYDO_CRED_REQUEST_V1 payload, then POSTs the hash here
-   * so the server can verify the Sepolia receipt and persist it.
+   * so the server can verify the Stellar transaction result and persist it.
    *
    * Only the requester (or root) can anchor their own request.
    */
@@ -103,8 +103,8 @@ export function registerCredentialRequestRoutes(app: Express) {
       if (!txHash || typeof txHash !== "string") {
         return res.status(400).json({ message: "txHash is required" });
       }
-      if (!/^0x[0-9a-f]{64}$/i.test(txHash)) {
-        return res.status(400).json({ message: "txHash is not a valid Ethereum transaction hash" });
+      if (!/^[0-9a-f]{64}$/i.test(txHash)) {
+        return res.status(400).json({ message: "txHash is not a valid Stellar transaction hash" });
       }
 
       const request = await storage.getCredentialRequest(id);
@@ -128,7 +128,7 @@ export function registerCredentialRequestRoutes(app: Express) {
       const result = await waitForClientTx(txHash, { timeoutMs: 45_000 });
       if (result.status === "unknown") {
         return res.status(422).json({
-          message: "Anchor tx not found on Sepolia. Retry signing.",
+          message: "Anchor tx not found on Stellar. Retry signing.",
           status: result.status,
         });
       }
@@ -157,7 +157,7 @@ export function registerCredentialRequestRoutes(app: Express) {
 
       log.info(
         { requestId: id, txHash, status: result.status },
-        "credential request anchored on-chain (MetaMask)",
+        "credential request anchored on-chain (wallet)",
       );
 
       res.json({
@@ -175,7 +175,7 @@ export function registerCredentialRequestRoutes(app: Express) {
 
   /**
    * Delete a credential request. Used by the Full-SSI client flow to roll
-   * back a request when the holder cancels the MetaMask anchor popup —
+   * back a request when the holder cancels the wallet anchor popup —
    * otherwise an un-anchored, un-wanted request would linger in the
    * issuer's pending queue.
    *
@@ -258,8 +258,8 @@ export function registerCredentialRequestRoutes(app: Express) {
           onChainTxHash,
           // Full-SSI two-phase flags:
           //  - prepareOnly: stage credential in Firestore + return hash,
-          //                 skip server-side on-chain signing (client will sign via MetaMask).
-          //  - finalize:    caller has already signed + confirmed on Sepolia;
+          //                 skip server-side on-chain signing (client will sign via wallet).
+          //  - finalize:    caller has already signed + confirmed on Stellar;
           //                 just mark request "issued" and link tx hash.
           //  - credentialId: passed in phase-2 finalize so we know which
           //                  previously-staged credential this maps to.
@@ -424,7 +424,7 @@ export function registerCredentialRequestRoutes(app: Express) {
         });
 
         // Full-SSI Phase-1: stop here. Client will sign issueCredential via
-        // MetaMask, PATCH /api/credentials/:id/tx to confirm the receipt,
+        // the wallet, PATCH /api/credentials/:id/tx to confirm the result,
         // then POST /respond again with finalize=true to mark request issued.
         if (prepareOnly) {
           log.info(

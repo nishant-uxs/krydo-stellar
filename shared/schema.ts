@@ -2,17 +2,36 @@ import { z } from "zod";
 
 // ---------- shared primitive validators ----------
 
-/** 0x-prefixed 20-byte Ethereum address (checksum not enforced; lowercased at storage layer). */
-export const ethAddressSchema = z
+/**
+ * Stellar account address in StrKey form: `G` + 55 base32 chars (ed25519
+ * public key). Case-sensitive — StrKey is canonical upper-case base32, so we
+ * never lower-case it (unlike EVM addresses).
+ */
+export const stellarAddressSchema = z
   .string()
   .trim()
-  .regex(/^0x[a-fA-F0-9]{40}$/, "Invalid Ethereum address");
+  .regex(/^G[A-Z2-7]{55}$/, "Invalid Stellar address (expected G...)");
 
-/** 0x-prefixed 32-byte hash (e.g., credential hash, commitment). */
-export const bytes32HexSchema = z
+/** Soroban contract id in StrKey form: `C` + 55 base32 chars. */
+export const stellarContractIdSchema = z
   .string()
   .trim()
-  .regex(/^0x[a-fA-F0-9]{64}$/, "Invalid 32-byte hex hash");
+  .regex(/^C[A-Z2-7]{55}$/, "Invalid Stellar contract id (expected C...)");
+
+/**
+ * 32-byte hex hash (credential hash / commitment). Bare hex, no `0x` prefix,
+ * to match Stellar's hex conventions; an optional `0x` is tolerated on input.
+ */
+export const hash32HexSchema = z
+  .string()
+  .trim()
+  .regex(/^(0x)?[a-fA-F0-9]{64}$/, "Invalid 32-byte hex hash");
+
+/** Stellar transaction hash: 64 lowercase hex chars (SHA-256 of the tx). */
+export const stellarTxHashSchema = z
+  .string()
+  .trim()
+  .regex(/^[a-f0-9]{64}$/i, "Invalid Stellar transaction hash");
 
 /** Generic short free-text field. */
 const shortText = (max: number) => z.string().trim().min(1).max(max);
@@ -30,7 +49,7 @@ export const walletRoles = ["root", "issuer", "user"] as const;
 export type WalletRole = typeof walletRoles[number];
 
 export const insertWalletSchema = z.object({
-  address: ethAddressSchema,
+  address: stellarAddressSchema,
   role: z.enum(walletRoles).default("user"),
   label: z.string().trim().max(128).nullable().optional(),
 });
@@ -74,11 +93,11 @@ export interface Issuer {
 }
 
 export const insertIssuerSchema = z.object({
-  walletAddress: ethAddressSchema,
+  walletAddress: stellarAddressSchema,
   name: shortText(120),
   description: z.string().trim().max(500).nullable().optional(),
   category: z.enum(issuerCategories).default("general"),
-  approvedBy: ethAddressSchema,
+  approvedBy: stellarAddressSchema,
 });
 export type InsertIssuer = z.infer<typeof insertIssuerSchema>;
 
@@ -110,8 +129,8 @@ const boundedJson = z.unknown().superRefine((val, ctx) => {
 });
 
 export const insertCredentialSchema = z.object({
-  issuerAddress: ethAddressSchema,
-  holderAddress: ethAddressSchema,
+  issuerAddress: stellarAddressSchema,
+  holderAddress: stellarAddressSchema,
   claimType: z.string().trim().min(1).max(64),
   claimSummary: shortText(500),
   claimData: boundedJson,
@@ -132,11 +151,12 @@ export interface Transaction {
 }
 
 export const insertTransactionSchema = z.object({
-  txHash: z.string().regex(/^0x[a-fA-F0-9]{64}$/),
+  txHash: stellarTxHashSchema,
   action: z.string().trim().min(1).max(64),
-  fromAddress: ethAddressSchema,
-  toAddress: ethAddressSchema.nullable().optional(),
+  fromAddress: stellarAddressSchema,
+  toAddress: stellarAddressSchema.nullable().optional(),
   data: boundedJson.optional(),
+  /** Soroban ledger sequence (kept as string for API stability). */
   blockNumber: z.string().trim().max(32),
 });
 export type InsertTransaction = z.infer<typeof insertTransactionSchema>;
@@ -144,23 +164,23 @@ export type InsertTransaction = z.infer<typeof insertTransactionSchema>;
 /**
  * Deterministic sentinel used as `txHash` on Transaction rows that were
  * created purely off-chain (e.g. ZK proof generation). All-zeros passes
- * the 32-byte-hex shape check in `insertTransactionSchema` but is trivially
- * distinguishable from a real Sepolia tx hash on the client, so the UI can
- * suppress Etherscan links for these rows.
+ * the 64-hex shape check in `insertTransactionSchema` but is trivially
+ * distinguishable from a real Stellar tx hash on the client, so the UI can
+ * suppress explorer links for these rows.
  */
 export const OFF_CHAIN_TX_HASH =
-  "0x0000000000000000000000000000000000000000000000000000000000000000";
+  "0000000000000000000000000000000000000000000000000000000000000000";
 
 /**
  * True when a transaction row represents a server-only / off-chain event
- * and MUST NOT be linked to Etherscan. Prefers the explicit
+ * and MUST NOT be linked to the block explorer. Prefers the explicit
  * `data.onChain === false` flag (set by the producer), and falls back to
  * the all-zeros sentinel for legacy rows.
  */
 export function isOffChainTx(tx: { txHash: string; data?: unknown }): boolean {
   const d = tx.data as { onChain?: boolean } | null | undefined;
   if (d && d.onChain === false) return true;
-  return tx.txHash === OFF_CHAIN_TX_HASH;
+  return /^0+$/.test(tx.txHash);
 }
 
 export const requestStatuses = ["pending", "approved", "rejected", "issued"] as const;
@@ -183,8 +203,8 @@ export interface CredentialRequest {
 }
 
 export const insertCredentialRequestSchema = z.object({
-  requesterAddress: ethAddressSchema,
-  issuerAddress: ethAddressSchema.nullable().optional(),
+  requesterAddress: stellarAddressSchema,
+  issuerAddress: stellarAddressSchema.nullable().optional(),
   issuerCategory: z.enum(issuerCategories).nullable().optional(),
   claimType: z.string().trim().min(1).max(64),
   message: z.string().trim().max(1000).nullable().optional(),
@@ -209,7 +229,7 @@ export interface ZkProof {
 
 export const insertZkProofSchema = z.object({
   credentialId: z.string().uuid(),
-  proverAddress: ethAddressSchema,
+  proverAddress: stellarAddressSchema,
   proofType: z.string().trim().min(1).max(32),
   publicInputs: boundedJson,
   proofData: boundedJson,

@@ -7,7 +7,7 @@ import { storage } from "../storage";
  *
  * - `/healthz` is unauthenticated and cheap — meant for load balancers and
  *   uptime pingers. Returns 200 iff the process is alive.
- * - `/readyz` checks that upstream dependencies (Firestore, Sepolia RPC)
+ * - `/readyz` checks that upstream dependencies (Firestore, Soroban RPC)
  *   are reachable. Returns 200 only when traffic should be routed here.
  *
  * Both follow the Kubernetes convention so they drop in unchanged if/when
@@ -32,7 +32,7 @@ export function registerHealthRoutes(app: Express) {
     // are valid and the SDK is reachable. We never care about the result, only
     // that the call succeeds.
     try {
-      await storage.getWallet("0x0000000000000000000000000000000000000000");
+      await storage.getWallet("GAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAWHF5");
       checks.firestore = { ok: true };
     } catch (err: any) {
       checks.firestore = { ok: false, detail: err?.message ?? "unknown error" };

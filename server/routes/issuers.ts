@@ -80,7 +80,7 @@ export function registerIssuerRoutes(app: Express) {
               .json({ message: `On-chain transaction failed: ${err.reason || err.message}` });
           }
         }
-        if (clientTxHash) log.info({ txHash: clientTxHash }, "issuer added on-chain (MetaMask)");
+        if (clientTxHash) log.info({ txHash: clientTxHash }, "issuer added on-chain (wallet)");
 
         const result = existing && !existing.active
           ? await storage.reactivateIssuer(
@@ -141,7 +141,7 @@ export function registerIssuerRoutes(app: Express) {
               .json({ message: `On-chain transaction failed: ${err.reason || err.message}` });
           }
         }
-        if (clientTxHash) log.info({ txHash: clientTxHash }, "issuer revoked on-chain (MetaMask)");
+        if (clientTxHash) log.info({ txHash: clientTxHash }, "issuer revoked on-chain (wallet)");
 
         const result = await storage.revokeIssuer(id, revokedBy, onChainTxHash);
         if (onChainTxHash && onChainBlockNumber) {

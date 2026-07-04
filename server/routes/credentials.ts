@@ -77,7 +77,7 @@ export function registerCredentialRoutes(app: Express) {
     try {
       const id = req.params.id as string;
       // Basic shape check so we don't collide with the /:address route
-      // (ETH addresses never contain dashes, UUIDs always do).
+      // (Stellar addresses never contain dashes, UUIDs always do).
       if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(id)) {
         return res.status(400).json({ message: "Invalid credential id" });
       }
@@ -129,7 +129,7 @@ export function registerCredentialRoutes(app: Express) {
         let finalTxHash = result.tx.txHash;
         let finalBlockNumber = result.tx.blockNumber;
         if (clientTxHash) {
-          log.info({ txHash: clientTxHash }, "credential issued on-chain (MetaMask)");
+          log.info({ txHash: clientTxHash }, "credential issued on-chain (wallet)");
           await storage.updateTransactionTxHash(result.tx.id, clientTxHash);
           finalTxHash = clientTxHash;
         } else if (isBlockchainReady()) {
@@ -160,8 +160,8 @@ export function registerCredentialRoutes(app: Express) {
   );
 
   /**
-   * Record a MetaMask-signed tx hash against a credential and — crucially —
-   * verify it against Sepolia before persisting. The previous implementation
+   * Record a wallet-signed tx hash against a credential and — crucially —
+   * verify it against Stellar before persisting. The previous implementation
    * blindly trusted whatever hex the client sent, which meant a dropped /
    * wrong-chain / reverted tx would still surface as "on-chain" in the UI.
    *
@@ -182,8 +182,8 @@ export function registerCredentialRoutes(app: Express) {
       if (!txHash || typeof txHash !== "string") {
         return res.status(400).json({ message: "txHash is required" });
       }
-      if (!/^0x[0-9a-f]{64}$/i.test(txHash)) {
-        return res.status(400).json({ message: "txHash is not a valid Ethereum transaction hash" });
+      if (!/^[0-9a-f]{64}$/i.test(txHash)) {
+        return res.status(400).json({ message: "txHash is not a valid Stellar transaction hash" });
       }
 
       const credential = await storage.getCredentialById(id);
@@ -206,8 +206,8 @@ export function registerCredentialRoutes(app: Express) {
           .json({ message: "Blockchain provider not configured on this server" });
       }
 
-      // Fetch the matching transaction row. We need its id to update block
-      // number once the Sepolia receipt lands.
+      // Fetch the matching transaction row. We need its id to update the
+      // ledger sequence once the Stellar result lands.
       const txs = await storage.getTransactions(credential.issuerAddress);
       const credTx = txs.find((t) => t.data && (t.data as any).credentialId === id);
       if (!credTx) {
@@ -220,7 +220,7 @@ export function registerCredentialRoutes(app: Express) {
       if (result.status === "unknown") {
         return res.status(422).json({
           message:
-            "Transaction not found on Sepolia. Please retry signing — your wallet may be on a different chain.",
+            "Transaction not found on Stellar. Please retry signing — your wallet may be on a different network.",
           status: result.status,
         });
       }
@@ -245,7 +245,7 @@ export function registerCredentialRoutes(app: Express) {
       await storage.updateTransactionOnChain(credTx.id, txHash, result.blockNumber);
       log.info(
         { txHash, blockNumber: result.blockNumber, credTxId: credTx.id },
-        "credential tx confirmed on-chain (MetaMask)",
+        "credential tx confirmed on-chain (wallet)",
       );
       res.json({
         success: true,
@@ -261,8 +261,8 @@ export function registerCredentialRoutes(app: Express) {
 
   /**
    * Server-initiated on-chain anchor for a credential that was saved to
-   * Firestore but never confirmed on Sepolia (e.g. the user's browser died
-   * between `storage.createCredential` and the MetaMask signature). Acts as
+   * Firestore but never confirmed on Stellar (e.g. the user's browser died
+   * between `storage.createCredential` and the wallet signature). Acts as
    * a "retry" button: we sign + submit from the root wallet on behalf of
    * the issuer, then update the tx row with the real hash + block.
    *
@@ -358,7 +358,7 @@ export function registerCredentialRoutes(app: Express) {
           log.error({ err: err.message }, "on-chain revokeCredential failed");
         }
       }
-      if (clientTxHash) log.info({ txHash: clientTxHash }, "credential revoked on-chain (MetaMask)");
+      if (clientTxHash) log.info({ txHash: clientTxHash }, "credential revoked on-chain (wallet)");
 
       const result = await storage.revokeCredential(id, revokedBy);
       if (chainTx && chainBlock) {
@@ -451,7 +451,7 @@ export function registerCredentialRoutes(app: Express) {
       // Full-SSI: if client already signed the anchor or will sign later,
       // skip server-side on-chain anchoring.
       if (clientTxHash) {
-        log.info({ txHash: clientTxHash }, "credential renewal anchored on-chain (MetaMask)");
+        log.info({ txHash: clientTxHash }, "credential renewal anchored on-chain (wallet)");
       } else if (!clientWillAnchor && isBlockchainReady()) {
         try {
           const r = await anchorCredentialRenewalOnChain(
@@ -468,7 +468,7 @@ export function registerCredentialRoutes(app: Express) {
       }
 
       await storage.createTransaction({
-        txHash: onChainTxHash || "0x" + crypto.randomBytes(32).toString("hex"),
+        txHash: onChainTxHash || crypto.randomBytes(32).toString("hex"),
         action: "credential_renewed",
         fromAddress: renewedBy,
         toAddress: credential.holderAddress,

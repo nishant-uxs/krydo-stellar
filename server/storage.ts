@@ -13,16 +13,18 @@ import {
 // ---------- helpers ----------
 
 function generateTxHash(): string {
-  return "0x" + crypto.randomBytes(32).toString("hex");
+  // Bare 64-hex, matching Stellar transaction-hash shape.
+  return crypto.randomBytes(32).toString("hex");
 }
 
 function generateCredentialHash(data: object): string {
-  return "0x" + crypto.createHash("sha256").update(JSON.stringify(data) + Date.now()).digest("hex");
+  // Bare 32-byte hex (no 0x); anchored on Soroban as BytesN<32>.
+  return crypto.createHash("sha256").update(JSON.stringify(data) + Date.now()).digest("hex");
 }
 
 /**
- * Block number placeholder for transaction rows that are not (yet) anchored
- * on-chain. When a real block number is known it is filled in via
+ * Ledger-sequence placeholder for transaction rows that are not (yet) anchored
+ * on-chain. When a real ledger sequence is known it is filled in via
  * `updateTransactionOnChain`.
  */
 const NO_BLOCK = "0";
@@ -31,8 +33,12 @@ function newId(): string {
   return crypto.randomUUID();
 }
 
-function lc(addr: string | null | undefined): string {
-  return (addr ?? "").toLowerCase();
+/**
+ * Normalise an address for storage/lookup. Stellar StrKey addresses are
+ * case-sensitive canonical base32, so we only trim — never change case.
+ */
+function normAddr(addr: string | null | undefined): string {
+  return (addr ?? "").trim();
 }
 
 /** Convert Firestore Timestamp / Date / ISO string to JS Date (or null). */
@@ -261,14 +267,14 @@ export class FirestoreStorage implements IStorage {
   // ----- wallets -----
 
   async getWallet(address: string): Promise<Wallet | undefined> {
-    const id = lc(address);
+    const id = normAddr(address);
     const doc = await collections.wallets.doc(id).get();
     if (!doc.exists) return undefined;
     return walletFromDoc(doc.data());
   }
 
   async createWallet(wallet: InsertWallet): Promise<Wallet> {
-    const address = lc(wallet.address);
+    const address = normAddr(wallet.address);
     const now = new Date();
     const payload = {
       address,
@@ -282,7 +288,7 @@ export class FirestoreStorage implements IStorage {
   }
 
   async connectWallet(address: string, role: string, label?: string): Promise<Wallet> {
-    const normalized = lc(address);
+    const normalized = normAddr(address);
     const existing = await this.getWallet(normalized);
     if (existing) {
       const needsUpdate = existing.role !== role || (label && existing.label !== label);
@@ -319,7 +325,7 @@ export class FirestoreStorage implements IStorage {
   }
 
   async updateWalletOnChainTxHash(address: string, txHash: string): Promise<void> {
-    await collections.wallets.doc(lc(address)).set({ onChainTxHash: txHash }, { merge: true });
+    await collections.wallets.doc(normAddr(address)).set({ onChainTxHash: txHash }, { merge: true });
   }
 
   // ----- issuers -----
@@ -336,7 +342,7 @@ export class FirestoreStorage implements IStorage {
   }
 
   async getIssuerByAddress(address: string): Promise<Issuer | undefined> {
-    const snap = await collections.issuers.where("walletAddress", "==", lc(address)).limit(1).get();
+    const snap = await collections.issuers.where("walletAddress", "==", normAddr(address)).limit(1).get();
     if (snap.empty) return undefined;
     const d = snap.docs[0];
     return issuerFromDoc(d.id, d.data());
@@ -345,8 +351,8 @@ export class FirestoreStorage implements IStorage {
   async createIssuer(data: InsertIssuer, onChainTxHash?: string | null): Promise<{ issuer: Issuer; tx: Transaction }> {
     const id = newId();
     const now = new Date();
-    const walletAddress = lc(data.walletAddress);
-    const approvedBy = lc(data.approvedBy);
+    const walletAddress = normAddr(data.walletAddress);
+    const approvedBy = normAddr(data.approvedBy);
 
     const issuerPayload = {
       id,
@@ -390,7 +396,7 @@ export class FirestoreStorage implements IStorage {
   }
 
   async reactivateIssuer(id: string, name: string, description: string, approvedBy: string, onChainTxHash?: string | null, category?: string): Promise<{ issuer: Issuer; tx: Transaction }> {
-    const approvedByLc = lc(approvedBy);
+    const approvedByLc = normAddr(approvedBy);
     const now = new Date();
     const patch: Record<string, any> = {
       active: true,
@@ -406,7 +412,7 @@ export class FirestoreStorage implements IStorage {
     const doc = await collections.issuers.doc(id).get();
     const issuer = issuerFromDoc(doc.id, doc.data());
 
-    await collections.wallets.doc(lc(issuer.walletAddress)).set({ role: "issuer", label: name }, { merge: true });
+    await collections.wallets.doc(normAddr(issuer.walletAddress)).set({ role: "issuer", label: name }, { merge: true });
 
     const txHash = onChainTxHash || generateTxHash();
     const txId = newId();
@@ -437,7 +443,7 @@ export class FirestoreStorage implements IStorage {
       id: txId,
       txHash,
       action: "issuer_revoked",
-      fromAddress: lc(revokedBy),
+      fromAddress: normAddr(revokedBy),
       toAddress: issuer.walletAddress,
       data: { issuerName: issuer.name, issuerId: id, onChain: !!onChainTxHash },
       blockNumber: NO_BLOCK,
@@ -462,7 +468,7 @@ export class FirestoreStorage implements IStorage {
 
   async getCredentials(holderAddress: string): Promise<Credential[]> {
     const snap = await collections.credentials
-      .where("holderAddress", "==", lc(holderAddress))
+      .where("holderAddress", "==", normAddr(holderAddress))
       .get();
     return snap.docs
       .map(d => credentialFromDoc(d.id, d.data()))
@@ -471,7 +477,7 @@ export class FirestoreStorage implements IStorage {
 
   async getCredentialsByIssuer(issuerAddress: string): Promise<Credential[]> {
     const snap = await collections.credentials
-      .where("issuerAddress", "==", lc(issuerAddress))
+      .where("issuerAddress", "==", normAddr(issuerAddress))
       .get();
     return snap.docs
       .map(d => credentialFromDoc(d.id, d.data()))
@@ -500,8 +506,8 @@ export class FirestoreStorage implements IStorage {
     const credHash = generateCredentialHash(data);
     const id = newId();
     const now = new Date();
-    const issuerAddress = lc(data.issuerAddress);
-    const holderAddress = lc(data.holderAddress);
+    const issuerAddress = normAddr(data.issuerAddress);
+    const holderAddress = normAddr(data.holderAddress);
 
     const payload = {
       id,
@@ -556,7 +562,7 @@ export class FirestoreStorage implements IStorage {
       id: txId,
       txHash,
       action: "credential_revoked",
-      fromAddress: lc(revokedBy),
+      fromAddress: normAddr(revokedBy),
       toAddress: credential.holderAddress,
       data: { credentialHash: credential.credentialHash, claimType: credential.claimType },
       blockNumber: NO_BLOCK,
@@ -594,8 +600,8 @@ export class FirestoreStorage implements IStorage {
       id,
       txHash: data.txHash,
       action: data.action,
-      fromAddress: lc(data.fromAddress),
-      toAddress: data.toAddress ? lc(data.toAddress) : null,
+      fromAddress: normAddr(data.fromAddress),
+      toAddress: data.toAddress ? normAddr(data.toAddress) : null,
       data: data.data ?? null,
       blockNumber: data.blockNumber,
       timestamp: new Date(),
@@ -609,7 +615,7 @@ export class FirestoreStorage implements IStorage {
       const snap = await collections.transactions.orderBy("timestamp", "desc").get();
       return snap.docs.map(d => transactionFromDoc(d.id, d.data()));
     }
-    const a = lc(address);
+    const a = normAddr(address);
     // Firestore doesn't support OR natively on different fields in a single query;
     // run two queries and merge.
     const [fromSnap, toSnap] = await Promise.all([
@@ -634,7 +640,7 @@ export class FirestoreStorage implements IStorage {
   // ----- stats -----
 
   async getStats(address: string, role: string) {
-    const a = lc(address);
+    const a = normAddr(address);
 
     if (role === "root") {
       const [issuersSnap, credsSnap, activeSnap, revokedSnap, txSnap] = await Promise.all([
@@ -694,7 +700,7 @@ export class FirestoreStorage implements IStorage {
     const payload = {
       id,
       credentialId: proof.credentialId,
-      proverAddress: lc(proof.proverAddress),
+      proverAddress: normAddr(proof.proverAddress),
       proofType: proof.proofType,
       publicInputs: proof.publicInputs ?? null,
       proofData: proof.proofData ?? null,
@@ -716,7 +722,7 @@ export class FirestoreStorage implements IStorage {
   }
 
   async getZkProofsByProver(address: string): Promise<ZkProof[]> {
-    const snap = await collections.zkProofs.where("proverAddress", "==", lc(address)).get();
+    const snap = await collections.zkProofs.where("proverAddress", "==", normAddr(address)).get();
     return snap.docs
       .map(d => zkProofFromDoc(d.id, d.data()))
       .sort((a, b) => b.createdAt.getTime() - a.createdAt.getTime());
@@ -752,8 +758,8 @@ export class FirestoreStorage implements IStorage {
     const now = new Date();
     const payload = {
       id,
-      requesterAddress: lc(data.requesterAddress),
-      issuerAddress: data.issuerAddress ? lc(data.issuerAddress) : null,
+      requesterAddress: normAddr(data.requesterAddress),
+      issuerAddress: data.issuerAddress ? normAddr(data.issuerAddress) : null,
       issuerCategory: data.issuerCategory ?? null,
       claimType: data.claimType,
       message: data.message ?? null,
@@ -775,14 +781,14 @@ export class FirestoreStorage implements IStorage {
   }
 
   async getCredentialRequestsByRequester(address: string): Promise<CredentialRequest[]> {
-    const snap = await collections.credentialRequests.where("requesterAddress", "==", lc(address)).get();
+    const snap = await collections.credentialRequests.where("requesterAddress", "==", normAddr(address)).get();
     return snap.docs
       .map(d => credentialRequestFromDoc(d.id, d.data()))
       .sort((a, b) => b.createdAt.getTime() - a.createdAt.getTime());
   }
 
   async getCredentialRequestsForIssuer(issuerAddress: string): Promise<CredentialRequest[]> {
-    const snap = await collections.credentialRequests.where("issuerAddress", "==", lc(issuerAddress)).get();
+    const snap = await collections.credentialRequests.where("issuerAddress", "==", normAddr(issuerAddress)).get();
     return snap.docs
       .map(d => credentialRequestFromDoc(d.id, d.data()))
       .sort((a, b) => b.createdAt.getTime() - a.createdAt.getTime());
@@ -845,7 +851,7 @@ export class FirestoreStorage implements IStorage {
   async listCredentialsForHolderPaged(address: string, opts?: PageOpts): Promise<PageResult<Credential>> {
     return paginateQuery(
       collections.credentials
-        .where("holderAddress", "==", lc(address))
+        .where("holderAddress", "==", normAddr(address))
         .orderBy("issuedAt", "desc"),
       collections.credentials,
       opts,
@@ -856,7 +862,7 @@ export class FirestoreStorage implements IStorage {
   async listCredentialsByIssuerPaged(address: string, opts?: PageOpts): Promise<PageResult<Credential>> {
     return paginateQuery(
       collections.credentials
-        .where("issuerAddress", "==", lc(address))
+        .where("issuerAddress", "==", normAddr(address))
         .orderBy("issuedAt", "desc"),
       collections.credentials,
       opts,
@@ -900,7 +906,7 @@ export class FirestoreStorage implements IStorage {
   async listCredentialRequestsByRequesterPaged(address: string, opts?: PageOpts): Promise<PageResult<CredentialRequest>> {
     return paginateQuery(
       collections.credentialRequests
-        .where("requesterAddress", "==", lc(address))
+        .where("requesterAddress", "==", normAddr(address))
         .orderBy("createdAt", "desc"),
       collections.credentialRequests,
       opts,
@@ -935,7 +941,7 @@ export class FirestoreStorage implements IStorage {
   async listZkProofsByProverPaged(address: string, opts?: PageOpts): Promise<PageResult<ZkProof>> {
     return paginateQuery(
       collections.zkProofs
-        .where("proverAddress", "==", lc(address))
+        .where("proverAddress", "==", normAddr(address))
         .orderBy("createdAt", "desc"),
       collections.zkProofs,
       opts,
