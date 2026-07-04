@@ -8,7 +8,17 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ## [Unreleased]
 
-Nothing pending.
+### Changed — migrated from Ethereum/EVM to Stellar (Soroban)
+
+- **Smart contracts** ported from Solidity to Soroban (Rust). Contract source now lives in a Cargo workspace under `contracts/` (crates: `authority/`, `credentials/`, `audit/`), built with `stellar contract build` into `contracts/target/wasm32v1-none/release/*.wasm` (`krydo_authority.wasm`, `krydo_credentials.wasm`, `krydo_audit.wasm`). Method names are now snake_case: `issue_credential`, `revoke_credential`, `get_credential`, `verify_credential`, `add_issuer`, `revoke_issuer`, `is_issuer`, `get_issuer_info`, `get_issuers`, `anchor`.
+- **On-chain library** swapped from `ethers` to `@stellar/stellar-sdk` (Soroban RPC). Deploy uses `stellar contract deploy`; contract IDs (`C...`) are written to `contracts/deployment.json` alongside `network`, `networkPassphrase`, `rpcUrl`, `horizonUrl`, `explorerUrl`, and `deployer`.
+- **Wallet** swapped from wagmi/RainbowKit/WalletConnect/MetaMask to [Freighter](https://freighter.app) (`@stellar/freighter-api`). Removed `client/src/lib/wagmi.ts` and `client/src/lib/eip1193-bridge.ts`; added `client/src/lib/stellar.ts`.
+- **Auth** migrated from EIP-4361 Sign-In-With-Ethereum to Sign-in-with-Stellar — a Freighter-signed ed25519 challenge over a server-issued nonce, verified with `Keypair.verify`. JWT flow unchanged; `sub` is now a StrKey account (`G...`, 56 chars, case-sensitive).
+- **Identifiers**: accounts are StrKey `G...` (case-sensitive, never lowercased); contract IDs are `C...`; transaction hashes are bare 64-hex (no `0x` prefix); credential/commitment hashes are bare hex anchored on Soroban as `BytesN<32>`.
+- **Explorer** links point at [Stellar Expert](https://stellar.expert/explorer/testnet) (`/tx/<hash>`, `/account/<G...>`, `/contract/<C...>`).
+- **Env vars**: `ALCHEMY_API_KEY` → `SOROBAN_RPC_URL` (optional; defaults to the public RPC in `contracts/deployment.json`); `DEPLOYER_PRIVATE_KEY` → `DEPLOYER_SECRET` (StrKey secret, `S...`); added `STELLAR_NETWORK` (`testnet`|`mainnet`|`futurenet`, default `testnet`); removed `VITE_WALLETCONNECT_PROJECT_ID`.
+- **W3C VC export** now emits `did:pkh:stellar:testnet:G...` issuer/subject IDs and a CAIP-2 chain of `stellar:testnet`.
+- The ZK crypto core is unchanged — still sigma protocols over Pedersen commitments on `secp256k1` (internal to the proofs, independent of Stellar's ed25519 account keys).
 
 ---
 
@@ -16,32 +26,32 @@ Nothing pending.
 
 Interop + UX upgrade. Three structural items that unblock production rollout.
 
-### Added — multi-wallet
+### Added — Freighter wallet
 
-- **wagmi v2 + RainbowKit v2** wired into the client. Users can now connect with MetaMask, WalletConnect v2 (mobile + hardware wallets), Coinbase Wallet, Rainbow, Rabby, Brave, Frame, or any other EIP-1193-compatible wallet — not just the MetaMask browser extension.
-- `client/src/lib/wagmi.ts` — connector registry. WalletConnect is gated behind `VITE_WALLETCONNECT_PROJECT_ID` so builds without a projectId still succeed (MetaMask / Coinbase / injected still work).
-- `client/src/lib/eip1193-bridge.ts` — pluggable provider shim so `lib/contracts.ts` can keep its ethers-based function signatures unchanged. The active wagmi connector's provider is pushed in whenever it changes.
-- `client/src/lib/wallet.tsx` — rewrote the `WalletProvider` internals on top of `useAccount`, `useSignMessage`, `useDisconnect`, and RainbowKit's `useConnectModal`. Public `useWallet()` API (address / role / connect / disconnect) is unchanged so no pages had to be rewritten.
-- Removed the old "MetaMask Required" dialog from `client/src/pages/landing.tsx` — RainbowKit's modal covers the "no wallet installed" case (offers the WalletConnect QR fallback).
-- Auto-triggers SIWE sign-in when wagmi reports a new connected address. On wallet-level disconnect, invalidates the Krydo JWT too.
+- **[Freighter](https://freighter.app)** (`@stellar/freighter-api`) wired into the client. Users connect with the Freighter browser extension, which signs Sign-in-with-Stellar challenges and Soroban transactions non-custodially (the ed25519 key never leaves the wallet).
+- `client/src/lib/stellar.ts` — Stellar network config mirroring the shared deployment metadata (network, passphrase, RPC URL, explorer helpers) so the browser signs on the same network the server anchors to.
+- `client/src/lib/contracts.ts` — client-side Soroban helpers that build an invocation, have Freighter sign it, submit via Soroban RPC, and wait for confirmation. Read helpers use RPC simulation only (no fee).
+- `client/src/lib/wallet.tsx` — `WalletProvider` internals sit on top of Freighter's `getAddress` / `signTransaction`. Public `useWallet()` API (address / role / connect / disconnect) is unchanged so no pages had to be rewritten.
+- The landing page "Connect Wallet" button prompts the Freighter extension; if it isn't installed the user is pointed at https://freighter.app.
+- Auto-triggers Sign-in-with-Stellar when Freighter reports a new connected address. On wallet-level disconnect, invalidates the Krydo JWT too.
 
 ### Added — W3C Verifiable Credentials Data Model v2
 
-- `shared/vc.ts` — pure view-layer mapper that renders an internal Krydo `Credential` as a W3C VC v2 JSON-LD document. Maps `issuerAddress` → `issuer.id` as `did:ethr:sepolia:0x...`, `holderAddress` → `credentialSubject.id`, `claimType` → PascalCased type tag + nested subject key, `credentialHash` → a `KrydoOnChainAnchor2025` proof with CAIP-2 chain ID (`eip155:11155111`). Handles `validFrom` / `validUntil`, and computes a live `credentialStatus.status` of `active | revoked | expired | suspended` using the now-aware predicate.
+- `shared/vc.ts` — pure view-layer mapper that renders an internal Krydo `Credential` as a W3C VC v2 JSON-LD document. Maps `issuerAddress` → `issuer.id` as `did:pkh:stellar:testnet:G...`, `holderAddress` → `credentialSubject.id`, `claimType` → PascalCased type tag + nested subject key, `credentialHash` → a `KrydoOnChainAnchor2025` proof with CAIP-2 chain ID (`stellar:testnet`). Handles `validFrom` / `validUntil`, and computes a live `credentialStatus.status` of `active | revoked | expired | suspended` using the now-aware predicate.
 - `GET /api/credentials/:id/vc` — public endpoint that returns the VC representation with `Content-Type: application/vc+ld+json`. Enables interop with Veramo, Ceramic, Walt.id, Microsoft Entra, Trinsic — anything that speaks W3C VC. Issuance paths stay gated behind `requireAuth + requireRole`; this is a read-only export.
-- 22 Vitest cases in `shared/vc.test.ts` covering context ordering, type naming, DID derivation (lowercase), subject nesting, validFrom/validUntil, status resolution (active / revoked / expired / suspended), proof anchor shape, issuer name optionality, ISO-string date coercion, and JSON serializability.
+- 22 Vitest cases in `shared/vc.test.ts` covering context ordering, type naming, DID derivation (case-sensitive StrKey), subject nesting, validFrom/validUntil, status resolution (active / revoked / expired / suspended), proof anchor shape, issuer name optionality, ISO-string date coercion, and JSON serializability.
 - Zero storage-shape changes. Internal `Credential` schema and Firestore layout are identical.
 
 ### Added — Render one-click deploy
 
 - `render.yaml` Blueprint: single `web` service that runs `npm ci && npm run build` / `npm start`, with `/healthz` as the liveness probe and `sync: false` markers on every secret so nothing is ever committed to git. Auto-generates `SESSION_SECRET` and `JWT_SECRET` on each environment.
-- `.env.example` now documents `FIREBASE_SERVICE_ACCOUNT` (inline JSON) as the cloud-friendly alternative to `GOOGLE_APPLICATION_CREDENTIALS` (file path), and the new `VITE_WALLETCONNECT_PROJECT_ID` build-time variable.
+- `.env.example` now documents `FIREBASE_SERVICE_ACCOUNT` (inline JSON) as the cloud-friendly alternative to `GOOGLE_APPLICATION_CREDENTIALS` (file path), plus the `STELLAR_NETWORK`, `SOROBAN_RPC_URL`, and `DEPLOYER_SECRET` variables.
 - README gains a "Deploy to Render" section and a W3C VC export example.
 
 ### Changed
 
 - Landing page + WalletButton copy: "Connect MetaMask" → "Connect Wallet". Same button, more honest label.
-- Project layout tree in README updated to call out `lib/wagmi.ts`, `lib/eip1193-bridge.ts`, `shared/vc.ts`, and `render.yaml`.
+- Project layout tree in README updated to call out `lib/stellar.ts`, `shared/vc.ts`, and `render.yaml`.
 - Tests bumped from 132 to **154** (+22 VC mapper cases).
 
 ---
@@ -63,7 +73,7 @@ Feature wave. Semantic upgrades to make the proof/credential system behave like 
 
 ### Added — operations
 
-- **Health + readiness probes.** `GET /healthz` reports uptime/version (cheap, for load balancer pings). `GET /readyz` checks upstream dependencies (Firestore + Sepolia connectivity) and returns `503 Degraded` when any check fails. Both follow Kubernetes conventions.
+- **Health + readiness probes.** `GET /healthz` reports uptime/version (cheap, for load balancer pings). `GET /readyz` checks upstream dependencies (Firestore + Soroban RPC connectivity) and returns `503 Degraded` when any check fails. Both follow Kubernetes conventions.
 - **Issuer analytics.** `GET /api/stats/issuer/:address` returns total issued, active, revoked, expired, expiring-soon counts, plus a `byClaimType` histogram for dashboard charts.
 
 ### Added — UX
@@ -87,7 +97,7 @@ First pitch-ready release. Full hardening of the security / crypto / infra found
 ### Added — security & cryptography
 
 - **Real zero-knowledge proofs.** Replaced the previous hash-commitment placeholder (`SHA256(value ∥ salt)`) with sigma protocols on secp256k1: Pedersen commitments, Schnorr proof-of-knowledge, knowledge-of-opening, bit-decomposition range proofs, equality proofs, k-way OR membership proofs. All primitives live in `server/crypto/{ec,pedersen,sigma}.ts`. Fiat–Shamir for non-interactivity.
-- **SIWE authentication.** EIP-4361 Sign-In With Ethereum flow (`server/auth/siwe.ts`) issues short-lived JWTs. Server no longer trusts `req.body.address` — every mutation is cryptographically tied to a `personal_sign` signature.
+- **Sign-in-with-Stellar authentication.** A Freighter-signed ed25519 challenge over a server-issued nonce (`server/auth/siwe.ts`) issues short-lived JWTs, verified with `Keypair.verify`. Server no longer trusts `req.body.address` — every mutation is cryptographically tied to a wallet signature.
 - **Role-based access control.** `requireAuth`, `requireRole(...)`, `requireSelf({ param | bodyKey })` middlewares gate every mutation.
 - **Input hardening.** Zod schemas on every body / params / query (`server/validation/schemas.ts`).
 - **Transport hardening.** Helmet CSP, CORS allowlist via `CORS_ORIGINS`, per-IP rate limits (stricter for sensitive ops).
@@ -103,20 +113,20 @@ First pitch-ready release. Full hardening of the security / crypto / infra found
 
 - **Routes split by domain.** Monolithic `server/routes.ts` broken into `server/routes/{issuers,credentials,credential-requests,zk,stats,network}.ts`.
 - **Cursor-based pagination.** Every list endpoint accepts `?limit=` + `?cursor=`, responds with `X-Next-Cursor` and `X-Page-Size` headers. Validated via Zod; hard cap at 200.
-- **Single source of truth for contracts.** `shared/contracts.ts` exports addresses + ABIs once; server and client both import from there. No more drift risk.
+- **Single source of truth for contracts.** `shared/contracts.ts` exports contract IDs + network metadata once; server and client both import from there. No more drift risk.
 - **`.env.example`** with full documentation of every required variable.
 - **Community health files:** `SECURITY.md`, `CONTRIBUTING.md`, GitHub issue + PR templates.
 - **Pitch-ready README** with Mermaid architecture + sequence diagrams, on-chain vs off-chain data matrix, sigma-vs-SNARK trade-off table, roadmap.
 
 ### Changed
 
-- **Real Sepolia block numbers.** Every on-chain operation returns and persists the actual `blockNumber` from the transaction receipt instead of the previous mock `"0x0"`. Affects `KrydoAuthority`, `KrydoCredentials`, and all anchoring helpers (`anchorRoleAssignmentOnChain`, `anchorCredentialRequestOnChain`, `anchorCredentialRenewalOnChain`).
+- **Real Stellar ledger numbers.** Every on-chain operation returns and persists the actual ledger sequence from the transaction result instead of the previous mock `"0"`. Affects `KrydoAuthority`, `KrydoCredentials`, and all anchoring helpers (`anchorRoleAssignmentOnChain`, `anchorCredentialRequestOnChain`, `anchorCredentialRenewalOnChain`).
 - **`ZkProof` protocol tag bumped** `krydo-zkp-v1` → `krydo-zkp-v2` to reflect the move from hash commitments to real EC commitments. Old proofs are not backward-compatible by design.
 
 ### Removed
 
-- **`POST /api/wallet/connect`** deleted. Replaced by the SIWE nonce → verify flow. The old endpoint trusted any client-supplied address and is now `410 Gone`.
-- **Server-side truncated ABIs** in `client/src/lib/contracts.ts`. Client imports from `shared/contracts.ts` instead.
+- **`POST /api/wallet/connect`** deleted. Replaced by the Sign-in-with-Stellar nonce → verify flow. The old endpoint trusted any client-supplied address and is now `410 Gone`.
+- **Server-side truncated contract metadata** in `client/src/lib/contracts.ts`. Client imports contract IDs from `shared/contracts.ts` instead.
 
 ### Security
 
@@ -127,4 +137,4 @@ First pitch-ready release. Full hardening of the security / crypto / infra found
 
 ## [0.1.0] — Baseline (pre-refactor)
 
-Initial commit. Krydo on Firebase + Sepolia with MetaMask wallet connection. Hash-based "ZK" placeholder, unauthenticated write endpoints, no tests. Documented here only for historical reference — do not run this version.
+Initial commit. Krydo on Firebase + Stellar with Freighter wallet connection. Hash-based "ZK" placeholder, unauthenticated write endpoints, no tests. Documented here only for historical reference — do not run this version.

@@ -1,6 +1,6 @@
 # Security Policy
 
-Krydo is an MVP running on Ethereum Sepolia testnet. The cryptographic core has been carefully implemented on top of audited primitives (`@noble/curves`, `@noble/hashes`) but the composition itself has **not been externally audited**. Please treat this as a research / pre-production codebase until further notice.
+Krydo is an MVP running on the Stellar testnet (Soroban smart contracts). The cryptographic core has been carefully implemented on top of audited primitives (`@noble/curves`, `@noble/hashes`) but the composition itself has **not been externally audited**. Please treat this as a research / pre-production codebase until further notice.
 
 ---
 
@@ -22,7 +22,7 @@ Only the latest commit on `main` is supported. There are no LTS branches yet —
 If you discover a vulnerability in Krydo — cryptographic flaw, authentication bypass, injection vector, on-chain logic issue, anything that could be exploited — please report it privately:
 
 - **Email:** (add a real contact address before making this repo public)
-- **GitHub Security Advisory:** https://github.com/nishant-uxs/krydo/security/advisories/new (preferred — gets triaged faster)
+- **GitHub Security Advisory:** https://github.com/nishant-uxs/krydo-stellar/security/advisories/new (preferred — gets triaged faster)
 
 Please include:
 
@@ -47,8 +47,8 @@ Please include:
 
 - Cryptographic correctness of `server/crypto/*` (EC math, Pedersen commitments, sigma protocols).
 - Zero-knowledge proof generation / verification in `server/zk-engine.ts`.
-- Authentication and authorization flow (SIWE + JWT).
-- On-chain contract logic in `contracts/*.sol`.
+- Authentication and authorization flow (Sign-in-with-Stellar ed25519 verification + JWT), including StrKey case-sensitivity handling.
+- On-chain contract logic in the Soroban (Rust) crates under `contracts/` (`authority/`, `credentials/`, `audit/`).
 - Server-side input validation / injection / SSRF.
 - Client-side XSS / CSRF.
 - Supply-chain risks in direct dependencies.
@@ -56,7 +56,7 @@ Please include:
 ## Out of scope
 
 - Denial-of-service attacks against the public demo (if/when one exists).
-- Issues in `@noble/curves`, `@noble/hashes`, `ethers`, `express`, or other upstream libraries — please report to the upstream project directly.
+- Issues in `@noble/curves`, `@noble/hashes`, `@stellar/stellar-sdk`, `express`, or other upstream libraries — please report to the upstream project directly.
 - Self-XSS requiring the attacker to have console access on their own machine.
 - Outdated deployment environments not matching the `main` branch.
 - Social engineering attacks.
@@ -69,8 +69,8 @@ Please include:
 These are public design choices, not vulnerabilities:
 
 - **Credentials plaintext lives in Firestore**, not on-chain. Losing Firestore makes commitments un-openable. Mitigation: migrate to IPFS/Arweave with user-held keys (planned).
-- **Single-key root authority.** The deployer wallet is the root. Compromise = total compromise. Mitigation: migrate to a Safe multi-sig (planned).
-- **Off-chain ZK verifier.** Proofs are verified by our backend, not by a Solidity contract. A malicious backend could return false positives. Mitigation: ship an on-chain Groth16/PLONK verifier (planned).
+- **Single-key root authority.** The deployer account (`G...`) is the root. Compromise = total compromise. Mitigation: migrate to a multi-sig / threshold-signed root account (planned).
+- **Off-chain ZK verifier.** Proofs are verified by our backend, not by a Soroban contract. A malicious backend could return false positives. Mitigation: ship an on-chain Groth16/PLONK verifier (planned).
 - **No W3C Verifiable Credentials conformance** yet. Interop with DID ecosystems is deliberately deferred.
 
 ---

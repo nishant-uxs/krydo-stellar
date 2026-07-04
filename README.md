@@ -2,14 +2,14 @@
 
 # Krydo
 
-### Privacy-preserving financial trust infrastructure on Ethereum
+### Privacy-preserving financial trust infrastructure on Stellar
 
 **Prove you qualify — without revealing what you have.**
 
-[![CI](https://github.com/nishant-uxs/krydo/actions/workflows/ci.yml/badge.svg)](https://github.com/nishant-uxs/krydo/actions/workflows/ci.yml)
+[![CI](https://github.com/nishant-uxs/krydo-stellar/actions/workflows/ci.yml/badge.svg)](https://github.com/nishant-uxs/krydo-stellar/actions/workflows/ci.yml)
 [![tests](https://img.shields.io/badge/tests-154%20passing-brightgreen)](./server/crypto/sigma.test.ts)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](./LICENSE)
-[![Network: Sepolia](https://img.shields.io/badge/network-Sepolia-627EEA?logo=ethereum&logoColor=white)](https://sepolia.etherscan.io/address/0x0BE4fE934Ff4e9B24186C1cdd0cdFe0594209821)
+[![Network: Stellar Testnet](https://img.shields.io/badge/network-Stellar%20Testnet-000000?logo=stellar&logoColor=white)](https://stellar.expert/explorer/testnet)
 [![Made with TypeScript](https://img.shields.io/badge/TypeScript-5.x-3178C6?logo=typescript&logoColor=white)](https://www.typescriptlang.org/)
 [![docs](https://img.shields.io/badge/docs-DOCUMENTATION.md-blue)](./DOCUMENTATION.md)
 [![security: disclosed privately](https://img.shields.io/badge/security-disclosure%20policy-red)](./SECURITY.md)
@@ -22,9 +22,9 @@
 
 ## TL;DR
 
-Krydo is a verifiable-credential system on Ethereum Sepolia. Issuers sign claims into `KrydoCredentials`; holders keep the plaintext off-chain and prove predicates over it with sigma-protocol zero-knowledge proofs (Pedersen commitments on secp256k1, Fiat–Shamir). A verifier learns whether the predicate holds — `score >= 700`, `income >= 1000000`, `issuer is whitelisted` — not the underlying value.
+Krydo is a verifiable-credential system on the Stellar network, running Soroban smart contracts. Issuers sign claims into `KrydoCredentials`; holders keep the plaintext off-chain and prove predicates over it with sigma-protocol zero-knowledge proofs (Pedersen commitments on secp256k1, Fiat–Shamir). A verifier learns whether the predicate holds — `score >= 700`, `income >= 1000000`, `issuer is whitelisted` — not the underlying value.
 
-Three contracts, one purpose each: `KrydoAuthority` owns the issuer whitelist, `KrydoCredentials` stores credential hashes and revocations, `KrydoAudit` anchors off-chain events that MetaMask would otherwise refuse to sign. Auth is EIP-4361 SIWE with a short-lived JWT. The server never holds user secrets; every state-changing action is signed by the acting wallet.
+Three Soroban contracts, one purpose each: `KrydoAuthority` owns the issuer whitelist, `KrydoCredentials` stores credential hashes and revocations, `KrydoAudit` anchors off-chain events. Auth is Sign-in-with-Stellar (a Freighter-signed ed25519 challenge) with a short-lived JWT. The server never holds user secrets; every state-changing action is signed by the acting wallet.
 
 ---
 
@@ -32,7 +32,7 @@ Three contracts, one purpose each: `KrydoAuthority` owns the issuer whitelist, `
 
 Current verification flows over-collect by default. A lender asking "do you earn at least ₹10 L?" gets the user's exact salary, employer, six months of bank statements, and often their PAN. That data leaks, gets re-sold, and can't be revoked once it's out.
 
-Zero-knowledge proofs solve the shape of this problem — prove the predicate, not the value — but SNARK-based stacks force circuits, trusted setup, and non-trivial gas. Krydo takes the simpler path: sigma protocols over Pedersen commitments on the same curve Ethereum already uses. No setup ceremony, no circuit compiler, proofs generated in the browser in milliseconds, verification in the same API call that fetches the credential.
+Zero-knowledge proofs solve the shape of this problem — prove the predicate, not the value — but SNARK-based stacks force circuits, trusted setup, and non-trivial cost. Krydo takes the simpler path: sigma protocols over Pedersen commitments on secp256k1. No setup ceremony, no circuit compiler, proofs generated in the browser in milliseconds, verification in the same API call that fetches the credential — and Stellar's sub-cent fees make anchoring effectively free.
 
 ---
 
@@ -52,8 +52,8 @@ flowchart LR
     USR -- "generates ZK proof<br/>(browser-side)" --> VER
     VER -- "verifies against<br/>on-chain anchor" --> RA
 
-    RA -.-> KA["KrydoAuthority.sol"]
-    ISS -.-> KC["KrydoCredentials.sol"]
+    RA -.-> KA["KrydoAuthority (Soroban)"]
+    ISS -.-> KC["KrydoCredentials (Soroban)"]
     USR -.-> ZK["zk-engine<br/>(client + server)"]
 
     classDef actor fill:#1f2937,stroke:#60a5fa,color:#f9fafb,stroke-width:2px
@@ -69,11 +69,11 @@ sequenceDiagram
     autonumber
     actor Alice as Alice<br/>(browser)
     participant Server as Krydo API
-    participant Chain as Sepolia
+    participant Chain as Stellar
     actor Lender as Lender
 
     Note over Alice,Chain: Issuance (once, done by employer)
-    Alice->>Chain: Employer signs KrydoCredentials.issueCredential(...)
+    Alice->>Chain: Employer signs KrydoCredentials.issue_credential(...)
     Chain-->>Alice: credential hash on-chain, plaintext off-chain
 
     Note over Alice,Lender: Proof generation (off-chain, no gas)
@@ -91,13 +91,13 @@ sequenceDiagram
     Note right of Lender: Lender knows Alice earns ≥ ₹10L.<br/>Does NOT know actual amount.
 ```
 
-> **For deeper flows** (SIWE auth, credential request lifecycle with MetaMask rollback, two-phase issuance, sigma-protocol internals, state machines, deployment topology), see **[`DOCUMENTATION.md`](./DOCUMENTATION.md)**.
+> **For deeper flows** (Sign-in-with-Stellar auth, credential request lifecycle with wallet rollback, two-phase issuance, sigma-protocol internals, state machines, deployment topology), see **[`DOCUMENTATION.md`](./DOCUMENTATION.md)**.
 
 ### What lives where
 
 ```mermaid
 flowchart LR
-    subgraph Chain["On Sepolia (public)"]
+    subgraph Chain["On Stellar (public)"]
         C1["issuer whitelist"]
         C2["credential hash"]
         C3["revocation events"]
@@ -160,27 +160,29 @@ See [`DOCUMENTATION.md §9–12`](./DOCUMENTATION.md#9-zero-knowledge-proof-syst
 
 | Layer                     | Choice                                                           |
 |---------------------------|------------------------------------------------------------------|
-| Smart contracts           | Solidity 0.8.x on Sepolia (`KrydoAuthority`, `KrydoCredentials`, `KrydoAudit`) |
-| On-chain library          | `ethers` v6                                                      |
+| Smart contracts           | Soroban (Rust) on Stellar (`KrydoAuthority`, `KrydoCredentials`, `KrydoAudit`) |
+| On-chain library          | `@stellar/stellar-sdk` (Soroban RPC)                            |
 | Cryptography              | `@noble/curves` (secp256k1), `@noble/hashes` (SHA-256)           |
 | Backend                   | Node 20, Express, TypeScript, Zod, pino, Helmet, jsonwebtoken    |
 | Database                  | Firebase Firestore (Admin SDK)                                   |
 | Frontend                  | React 18, Vite, TanStack Query, shadcn/ui, Tailwind, wouter      |
-| Wallet                    | wagmi v2 + RainbowKit v2 (MetaMask, WalletConnect, Coinbase, Rabby, Brave, injected) |
-| Auth                      | EIP-4361 SIWE + JWT (`jsonwebtoken`)                             |
+| Wallet                    | Freighter (`@stellar/freighter-api`)                            |
+| Auth                      | Sign-in-with-Stellar (ed25519 challenge) + JWT (`jsonwebtoken`) |
 | Testing                   | Vitest + `@vitest/coverage-v8` (154 tests)                       |
 | CI                        | GitHub Actions (Node 20, typecheck + test)                       |
 
 ---
 
-## Live deployment (Sepolia)
+## Deployment (Stellar Testnet)
 
-| Contract              | Address                                                                                         |
-|-----------------------|-------------------------------------------------------------------------------------------------|
-| `KrydoAuthority`      | [`0x0BE4fE934Ff4e9B24186C1cdd0cdFe0594209821`](https://sepolia.etherscan.io/address/0x0BE4fE934Ff4e9B24186C1cdd0cdFe0594209821) |
-| `KrydoCredentials`    | [`0xEdb9EB8966053B5dc7C6ec17C65673D919Ea77Cb`](https://sepolia.etherscan.io/address/0xEdb9EB8966053B5dc7C6ec17C65673D919Ea77Cb) |
-| `KrydoAudit`          | [`0x326b67F2a4eB4DB431825Da06BA0776f8d8A2C8e`](https://sepolia.etherscan.io/address/0x326b67F2a4eB4DB431825Da06BA0776f8d8A2C8e) |
-| Root authority wallet | [`0x4Debe0136310df354CE1E8846799409d37f704cB`](https://sepolia.etherscan.io/address/0x4Debe0136310df354CE1E8846799409d37f704cB) |
+Contract IDs are written to [`contracts/deployment.json`](./contracts/deployment.json) after you run `npm run deploy:contracts`. Once deployed, each `C...` contract ID is browsable on [Stellar Expert](https://stellar.expert/explorer/testnet):
+
+| Contract              | Contract ID (`C...`)                        |
+|-----------------------|---------------------------------------------|
+| `KrydoAuthority`      | see `contracts/deployment.json`             |
+| `KrydoCredentials`    | see `contracts/deployment.json`             |
+| `KrydoAudit`          | see `contracts/deployment.json`             |
+| Root authority (`G...`) | deployer account, funded via friendbot    |
 
 ---
 
@@ -189,16 +191,16 @@ See [`DOCUMENTATION.md §9–12`](./DOCUMENTATION.md#9-zero-knowledge-proof-syst
 ### Prerequisites
 
 - Node.js **20+**
+- Rust + the [Stellar CLI](https://developers.stellar.org/docs/tools/cli) (only needed to build/deploy contracts)
 - A Firebase project with Firestore enabled + an Admin SDK service-account JSON
-- An Alchemy API key for **Sepolia**
-- A Sepolia wallet funded with test ETH (for issuer / credential operations)
-- Any EIP-1193 wallet — MetaMask, Coinbase, Rainbow, Rabby, Brave, Frame, or mobile via WalletConnect QR
+- A Stellar testnet account funded via [friendbot](https://friendbot.stellar.org) (for issuer / credential operations)
+- The [Freighter](https://freighter.app) browser wallet extension
 
 ### Install & run
 
 ```bash
-git clone https://github.com/nishant-uxs/krydo.git
-cd krydo
+git clone https://github.com/nishant-uxs/krydo-stellar.git
+cd krydo-stellar
 npm install
 cp .env.example .env        # fill in values — server validates at boot
 npm run dev                 # http://localhost:5000 with HMR
@@ -228,13 +230,13 @@ npm run check:indexes   # prints CREATING / READY for each composite index
 ### (Optional) Re-deploy contracts
 
 ```bash
-npm run compile:contracts    # solc → contracts/artifacts/
-npm run deploy:contracts     # writes contracts/deployment.json
+npm run compile:contracts    # stellar contract build → contracts/target/…/*.wasm
+npm run deploy:contracts     # stellar contract deploy → writes contracts/deployment.json
 ```
 
 ### Deploy to Render
 
-The repo ships with a [`render.yaml`](./render.yaml) Blueprint — push to GitHub, click **New +** → **Blueprint** in Render, fill in the prompted secrets (`FIREBASE_SERVICE_ACCOUNT`, `ALCHEMY_API_KEY`, `DEPLOYER_PRIVATE_KEY`, `CORS_ORIGINS`, `VITE_WALLETCONNECT_PROJECT_ID`) and apply. Full walkthrough in [`DEPLOY.md`](./DEPLOY.md).
+The repo ships with a [`render.yaml`](./render.yaml) Blueprint — push to GitHub, click **New +** → **Blueprint** in Render, fill in the prompted secrets (`FIREBASE_SERVICE_ACCOUNT`, `DEPLOYER_SECRET`, `SOROBAN_RPC_URL`, `CORS_ORIGINS`) and apply. Full walkthrough in [`DEPLOY.md`](./DEPLOY.md).
 
 ### Export as W3C Verifiable Credential
 
@@ -242,24 +244,24 @@ The repo ships with a [`render.yaml`](./render.yaml) Blueprint — push to GitHu
 curl https://krydo.onrender.com/api/credentials/<uuid>/vc
 ```
 
-Returns `application/vc+ld+json` with a `did:ethr:sepolia` subject and a Krydo on-chain anchor proof — consumable by Veramo, Ceramic, Walt.id, Microsoft Entra, or anything that speaks the spec.
+Returns `application/vc+ld+json` with a `did:pkh:stellar` subject and a Krydo on-chain anchor proof — consumable by Veramo, Ceramic, Walt.id, Microsoft Entra, or anything that speaks the spec.
 
 ---
 
 ## Project layout
 
 ```
-krydo/
+krydo-stellar/
 ├── client/                    # React app (Vite)
 ├── server/                    # Express API
-│   ├── auth/                  # SIWE + JWT
+│   ├── auth/                  # Sign-in-with-Stellar + JWT
 │   ├── crypto/                # EC math, Pedersen, sigma protocols
 │   ├── routes/                # issuers, credentials, zk, stats, health
-│   ├── blockchain.ts          # ethers + contract wrappers
+│   ├── blockchain.ts          # Soroban RPC + contract wrappers
 │   ├── storage.ts             # Firestore abstraction
 │   └── zk-engine.ts           # high-level proof types
-├── shared/                    # types + ABIs used by both sides
-├── contracts/                 # .sol sources + deployment.json
+├── shared/                    # types + contract metadata used by both sides
+├── contracts/                 # Soroban Rust workspace + deployment.json
 ├── render.yaml                # Render Blueprint
 └── DOCUMENTATION.md           # ← full architecture spec
 ```
@@ -281,9 +283,9 @@ See [`DOCUMENTATION.md §16`](./DOCUMENTATION.md#16-security-layers) for the ful
 ### Shipped
 
 - [x] Real ZK primitives on secp256k1 (Pedersen + sigma protocols)
-- [x] SIWE authentication + JWT
+- [x] Sign-in-with-Stellar authentication + JWT
 - [x] Full SSI mode — every on-chain write goes through the user's wallet
-- [x] `KrydoAudit` contract for MetaMask-signed off-chain anchors
+- [x] `KrydoAudit` contract for wallet-signed off-chain anchors
 - [x] Helmet + CORS + per-IP rate limiting + Zod everywhere
 - [x] Structured logging (pino) + request IDs
 - [x] Per-claim-type structured Zod schemas
@@ -292,7 +294,7 @@ See [`DOCUMENTATION.md §16`](./DOCUMENTATION.md#16-security-layers) for the ful
 - [x] Health + readiness probes (`/healthz`, `/readyz`)
 - [x] Issuer analytics (`/api/stats/issuer/:address`)
 - [x] Search + filter on credential and issuer lists
-- [x] Multi-wallet via wagmi v2 + RainbowKit v2
+- [x] Freighter wallet integration (`@stellar/freighter-api`)
 - [x] W3C Verifiable Credentials v2 export
 - [x] One-click Render deploy (`render.yaml`)
 - [x] 154 unit tests + GitHub Actions CI + coverage artifact
@@ -337,6 +339,6 @@ All contributions are reviewed for security first, features second.
 
 **Built with cryptography, not hype.**
 
-For the deep dive: **[`DOCUMENTATION.md`](./DOCUMENTATION.md)** · Questions? Open an [issue](https://github.com/nishant-uxs/krydo/issues).
+For the deep dive: **[`DOCUMENTATION.md`](./DOCUMENTATION.md)** · Questions? Open an [issue](https://github.com/nishant-uxs/krydo-stellar/issues).
 
 </div>

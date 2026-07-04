@@ -57,7 +57,7 @@ body:
       options:
         - Server (Node / Express)
         - Client (browser UI)
-        - Smart contracts (Sepolia)
+        - Smart contracts (Soroban / Stellar)
         - CI / build pipeline
         - Tests
     validations:

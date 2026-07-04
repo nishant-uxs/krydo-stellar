@@ -1,6 +1,6 @@
 # Deploying Krydo to Render
 
-Step-by-step guide to get Krydo running on [Render](https://render.com/) with a live Sepolia anchor and public `/verify/:id` endpoint that QR scans can hit.
+Step-by-step guide to get Krydo running on [Render](https://render.com/) with a live Stellar testnet anchor and public `/verify/:id` endpoint that QR scans can hit.
 
 The project ships with a [`render.yaml`](./render.yaml) blueprint, so 90 % of the work is just filling in secrets in the Render UI.
 
@@ -11,36 +11,41 @@ The project ships with a [`render.yaml`](./render.yaml) blueprint, so 90 % of th
 | Item | Where to get it | Purpose |
 |---|---|---|
 | **GitHub repo** | Your fork of this repo pushed to `main` | Render deploys from git |
-| **Alchemy Sepolia API key** | https://dashboard.alchemy.com → "Create app" → network `Ethereum Sepolia` | Server RPC |
-| **Funded Sepolia wallet** | Fresh MetaMask account + https://www.alchemy.com/faucets/ethereum-sepolia for test ETH | Deployer + root anchor wallet |
+| **Soroban RPC URL** (optional) | Public RPC (`https://soroban-testnet.stellar.org`) is baked into `contracts/deployment.json`; override with your own / a paid provider | Server RPC |
+| **Funded Stellar testnet account** | `stellar keys generate deployer --network testnet --fund` (funds it via [friendbot](https://friendbot.stellar.org)) | Deployer + root anchor account |
 | **Firebase project** | https://console.firebase.google.com/ → "Add project" → Firestore in **native** mode | Storage |
 | **Firebase service-account JSON** | Firebase console → Project settings → Service accounts → "Generate new private key" | Server auth to Firestore |
-| **WalletConnect Cloud project ID** (optional but recommended) | https://cloud.walletconnect.com/ → "Create project" | Enables WalletConnect QR in the wallet modal |
+| **Freighter wallet** (for using the app) | https://freighter.app browser extension | Signs Sign-in-with-Stellar + transactions |
 
 > ⚠️ The service-account JSON gives **full admin access** to your Firestore. Never commit it. You'll paste it into Render's Environment tab as a single `FIREBASE_SERVICE_ACCOUNT` secret — `server/config.ts` already knows how to parse that.
 
 ---
 
-## 1. Deploy Sepolia contracts (one-off, from your laptop)
+## 1. Deploy Soroban contracts (one-off, from your laptop)
 
-Render does **not** deploy smart contracts for you. Do this once, locally:
+Render does **not** deploy smart contracts for you. Do this once, locally. You'll need Rust + the [Stellar CLI](https://developers.stellar.org/docs/tools/cli) installed.
 
 ```bash
-# 1. Fill .env with ALCHEMY_API_KEY + DEPLOYER_PRIVATE_KEY (must have Sepolia ETH)
+# 1. Create + fund a deployer account on testnet, then read its secret.
+stellar keys generate deployer --network testnet --fund
+stellar keys secret deployer          # prints the S... secret
+
+# 2. Fill .env with DEPLOYER_SECRET (the S... above) and optionally
+#    SOROBAN_RPC_URL / STELLAR_NETWORK.
 cp .env.example .env
 # edit .env
 
-# 2. Compile + deploy
+# 3. Build + deploy
 npm install
-npx hardhat compile
-npm run deploy:contracts
+npm run compile:contracts   # stellar contract build → contracts/target/wasm32v1-none/release/*.wasm
+npm run deploy:contracts    # stellar contract deploy → writes contracts/deployment.json
 ```
 
-This writes `contracts/deployment.json` with the addresses of `KrydoAuthority` and `KrydoCredentials`. **Commit that file** — the server and client read it at build time via `@shared/contracts`.
+This writes `contracts/deployment.json` with the contract IDs (`C...`) of `KrydoAuthority`, `KrydoCredentials`, and `KrydoAudit`, plus `network`, `networkPassphrase`, `rpcUrl`, `horizonUrl`, `explorerUrl`, and `deployer`. **Commit that file** — the server and client read it at build time via `@shared/contracts`.
 
 ```bash
 git add contracts/deployment.json
-git commit -m "chore: deploy Sepolia contracts"
+git commit -m "chore: deploy Soroban contracts"
 git push origin main
 ```
 
@@ -77,12 +82,12 @@ In Render dashboard → `krydo` service → **Environment** tab → **Add Enviro
 |---|---|---|
 | `FIREBASE_SERVICE_ACCOUNT` | *Paste full JSON as one line* | The entire contents of the service-account file, including the BEGIN/END PRIVATE KEY. Render accepts multi-line secrets but pasting the raw JSON string (with `\n` kept as literal backslash-n inside the private_key field) is safest. |
 | `FIREBASE_PROJECT_ID` | e.g. `krydo-c51f7` | Must match the `project_id` inside the JSON above |
-| `ALCHEMY_API_KEY` | `v2/abc123…` or the full `https://eth-sepolia.g.alchemy.com/v2/…` URL | Server tolerates either |
-| `DEPLOYER_PRIVATE_KEY` | `0x…64 hex…` | Same wallet that deployed the contracts — it is the root authority |
+| `STELLAR_NETWORK` | `testnet` | `testnet` \| `mainnet` \| `futurenet`. Defaults to `testnet` |
+| `SOROBAN_RPC_URL` | `https://soroban-testnet.stellar.org` | Optional — defaults to the public RPC in `contracts/deployment.json` |
+| `DEPLOYER_SECRET` | `S…56-char StrKey secret…` | Same account that deployed the contracts — it is the root authority |
 | `CORS_ORIGINS` | `https://krydo.onrender.com` | Add your custom domain too, comma-separated |
-| `VITE_WALLETCONNECT_PROJECT_ID` | e.g. `8484c8fc505b035452a0916d2bdcf60b` | Omit if you don't care about WalletConnect |
 
-`SESSION_SECRET` and `JWT_SECRET` are auto-generated by Render — leave them alone. `NODE_ENV`, `NODE_VERSION`, `PORT`, `RATE_LIMIT_*` come from the blueprint.
+`SESSION_SECRET` and `JWT_SECRET` are auto-generated by Render — leave them alone. `NODE_ENV`, `NODE_VERSION`, `PORT`, `RATE_LIMIT_*` come from the blueprint. The browser uses the [Freighter](https://freighter.app) extension for signing, so no build-time wallet secret is required.
 
 Click **Save Changes** — Render automatically triggers a fresh deploy.
 
@@ -99,13 +104,13 @@ vite v5.x building for production…
 ✓ built in 12.3s
 
 ==> Running 'npm start'
-Blockchain initialized. Root: 0xabc…
-Authority contract: 0x…
-Credentials contract: 0x…
+Blockchain initialized. Root: GABC…
+Authority contract: C…
+Credentials contract: C…
 Server listening on :5000
 ```
 
-If you see `Blockchain keys not configured. Running in off-chain mode.` — `ALCHEMY_API_KEY` or `DEPLOYER_PRIVATE_KEY` is missing.
+If you see `Blockchain keys not configured. Running in off-chain mode.` — `DEPLOYER_SECRET` is missing (or the contract IDs in `contracts/deployment.json` are empty).
 
 If you see `FIREBASE_SERVICE_ACCOUNT parse failed` — the JSON you pasted has unescaped newlines. Easiest fix: in Render, open the variable, paste the JSON **inside** single quotes with no reformatting, save.
 
@@ -119,9 +124,9 @@ Replace `krydo.onrender.com` with your actual Render URL.
 |---|---|---|
 | Healthz | `curl https://krydo.onrender.com/healthz` | `{"ok":true}` |
 | Readyz | `curl https://krydo.onrender.com/readyz` | `{"firestore":true,"blockchain":true}` |
-| SPA | Open `https://krydo.onrender.com/` in a browser | Landing page renders, "Connect Wallet" opens the RainbowKit modal with at least MetaMask |
+| SPA | Open `https://krydo.onrender.com/` in a browser | Landing page renders, "Connect Wallet" prompts the Freighter extension |
 | Public verify | Open `https://krydo.onrender.com/verify/nonexistent` | Verify page renders with "ZK proof not found" card — proves the public route works without auth |
-| Issue a credential | Sign in as issuer → Issue tab → fill form → sign the MetaMask tx | Success dialog shows real Sepolia tx hash; clicking it opens https://sepolia.etherscan.io |
+| Issue a credential | Sign in as issuer → Issue tab → fill form → sign the tx in Freighter | Success dialog shows a real Stellar tx hash (bare 64-hex); clicking it opens https://stellar.expert/explorer/testnet |
 | QR + scan | ZK Proofs tab → generate a proof → click QR button → scan with phone | Phone lands on `/verify/<id>` and auto-shows the live verification result |
 
 ---
@@ -141,20 +146,20 @@ Replace `krydo.onrender.com` with your actual Render URL.
 
 ### Repair legacy credentials
 
-If you issued credentials **before** the PATCH-verification fix, their tx hashes may be placeholders. Run the repair script from your laptop once (it signs with the same `DEPLOYER_PRIVATE_KEY`):
+If you issued credentials **before** the PATCH-verification fix, their tx hashes may be placeholders. Run the repair script from your laptop once (it signs with the same `DEPLOYER_SECRET`):
 
 ```bash
 npx tsx script/reanchor-creds.ts            # dry run, show what needs fixing
 npx tsx script/reanchor-creds.ts --apply    # actually submit the anchor txs
 ```
 
-Each broken credential now gets a real Sepolia tx + block number. The UI's "Verified on Sepolia" badge lights up next time you reload.
+Each broken credential now gets a real Stellar tx hash + ledger number. The UI's "Verified on Stellar" badge lights up next time you reload.
 
 Or, for one-off fixes, sign in as the issuer and hit the **Re-anchor** button on the credential card — the server submits the tx on your behalf.
 
 ### Rotate secrets
 
-- **Any time DEPLOYER_PRIVATE_KEY is exposed**: deploy new contracts, update `contracts/deployment.json`, redeploy.
+- **Any time DEPLOYER_SECRET is exposed**: deploy new contracts, update `contracts/deployment.json`, redeploy.
 - **Firebase key compromise**: Firebase console → Service accounts → Delete the old key → generate a new one → update `FIREBASE_SERVICE_ACCOUNT` in Render.
 
 ### Cold starts (free plan)
@@ -171,9 +176,9 @@ Render keeps 7 days of logs on the free plan. For long-term retention, add a log
 
 | Symptom | Likely cause | Fix |
 |---|---|---|
-| `Blockchain keys not configured` at boot | `ALCHEMY_API_KEY` or `DEPLOYER_PRIVATE_KEY` empty | Re-check **Environment** tab, trigger manual deploy |
-| "Verify credential" returns `onChain: false` for a brand-new credential | Sepolia tx pending or reverted | Check the etherscan link in the UI. If reverted, the issuer likely isn't authorized — re-run `addIssuer` |
-| Wallet modal shows no wallets | `VITE_WALLETCONNECT_PROJECT_ID` missing **and** no MetaMask installed | Install MetaMask, or set the WalletConnect ID and redeploy |
+| `Blockchain keys not configured` at boot | `DEPLOYER_SECRET` empty or contract IDs missing in `contracts/deployment.json` | Re-check **Environment** tab, trigger manual deploy |
+| "Verify credential" returns `onChain: false` for a brand-new credential | Stellar tx pending or failed | Check the Stellar Expert link in the UI. If it failed, the issuer likely isn't authorized — re-run `add_issuer` |
+| "Connect Wallet" does nothing | Freighter extension not installed / not on the right network | Install [Freighter](https://freighter.app) and switch it to Testnet |
 | `Firebase FAILED_PRECONDITION … requires an index` | Composite index not deployed or not READY yet | Run `npm run deploy:indexes && npm run check:indexes` |
 | Public `/verify/:id` shows "not found" for a proof you just made | Firestore replication lag (rare) or wrong project | Wait 10 s, then check `FIREBASE_PROJECT_ID` matches the console project |
 | CORS error in browser console | `CORS_ORIGINS` doesn't list the frontend origin | Add the exact `https://…` origin (no trailing slash), redeploy |
@@ -182,10 +187,10 @@ Render keeps 7 days of logs on the free plan. For long-term retention, add a log
 
 ## 10. Disaster recovery
 
-Everything non-chain lives in Firestore; all chain state is on Sepolia under `contracts/deployment.json`. Backup is a one-liner:
+Everything non-chain lives in Firestore; all chain state is on Stellar, with contract IDs recorded in `contracts/deployment.json`. Backup is a one-liner:
 
 ```bash
 gcloud firestore export gs://<your-bucket>/krydo-$(date +%F)
 ```
 
-To rebuild from scratch: fork repo → run steps 1–6 with the same `DEPLOYER_PRIVATE_KEY` (so you inherit the same contract addresses) and import the Firestore export.
+To rebuild from scratch: fork repo → run steps 1–6 with the same `DEPLOYER_SECRET` and the same committed `contracts/deployment.json` (so you inherit the same contract IDs) and import the Firestore export.
