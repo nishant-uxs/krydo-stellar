@@ -23,6 +23,7 @@ import {
 } from "lucide-react";
 import { SiStellar } from "react-icons/si";
 import { motion, AnimatePresence } from "framer-motion";
+import { Stellar3DScene } from "@/components/stellar-3d-scene";
 
 const fadeUp = {
   initial: { opacity: 0, y: 30 },
@@ -152,12 +153,17 @@ export default function Landing() {
 
             {/* Interactive Demo Representation Panel (Mental Model "Wow" factor) */}
             <motion.div 
-              className="lg:col-span-5"
+              className="lg:col-span-5 relative flex items-center justify-center min-h-[500px] xl:min-h-[550px]"
               initial={{ opacity: 0, scale: 0.95, x: 20 }}
               animate={{ opacity: 1, scale: 1, x: 0 }}
               transition={{ duration: 0.8, delay: 0.2, ease: [0.16, 1, 0.3, 1] }}
             >
-              <div className="relative rounded-2xl border border-border bg-card/60 backdrop-blur-md shadow-2xl p-6 glow-primary">
+              {/* Interactive 3D Stellar Orbit Scene behind/around the Card */}
+              <div className="absolute inset-0 z-0 flex items-center justify-center opacity-85 scale-110 sm:scale-120 pointer-events-none">
+                <Stellar3DScene />
+              </div>
+
+              <div className="relative z-10 rounded-2xl border border-border bg-card/65 backdrop-blur-xl shadow-2xl p-6 glow-primary w-full max-w-[400px]">
                 {/* Visual Glass Header */}
                 <div className="flex items-center justify-between border-b pb-4 mb-4">
                   <div className="flex items-center gap-2">
