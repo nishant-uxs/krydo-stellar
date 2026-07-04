@@ -1,15 +1,15 @@
 /**
  * One-off repair: re-anchors any credential whose Firestore row exists but
- * is NOT on-chain on Sepolia. Used to clean up records from the pre-fix era
+ * is NOT on-chain on Stellar. Used to clean up records from the pre-fix era
  * when the client's PATCH /api/credentials/:id/tx swallowed errors silently
  * and left the DB pointing at fake placeholder tx hashes.
  *
  * Iterates all credentials, skips those already confirmed via
  * verifyCredentialOnChain, and for the rest calls the server's
  * issueCredentialOnChain (signed by the root wallet) and updates the
- * matching transaction row with the real hash + block number.
+ * matching transaction row with the real hash + ledger sequence.
  *
- * Requires: ALCHEMY_API_KEY, DEPLOYER_PRIVATE_KEY, Firebase credentials.
+ * Requires: SOROBAN_RPC_URL, DEPLOYER_SECRET, Firebase credentials.
  *
  * Usage:
  *   npx tsx script/reanchor-creds.ts                # dry run, show what would happen

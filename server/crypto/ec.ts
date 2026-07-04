@@ -4,7 +4,9 @@ import { bytesToHex, hexToBytes, utf8ToBytes, concatBytes } from "@noble/hashes/
 
 /**
  * Low-level elliptic-curve primitives used by the Krydo ZK stack. We commit to
- * secp256k1 because ethers.js already carries it and we never need pairings.
+ * secp256k1 (via @noble/curves) as a well-audited prime-order group; we never
+ * need pairings. Note this is independent of Stellar's ed25519 account keys —
+ * it only backs the ZK commitments below.
  * The "real ZK" here is sigma-protocol-based (Pedersen + Schnorr + OR-proofs),
  * not SNARKs, but it is cryptographically sound: soundness + honest-verifier ZK
  * under the discrete-log assumption on secp256k1.

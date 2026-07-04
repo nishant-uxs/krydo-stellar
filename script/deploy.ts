@@ -1,97 +1,131 @@
-// Load .env first so ALCHEMY_API_KEY / DEPLOYER_PRIVATE_KEY are available when
-// read below. Side-effect import; must stay above any env-reading code.
+// Deploy the Krydo Soroban contracts and write contracts/deployment.json.
+//
+// Prereqs:
+//   - DEPLOYER_SECRET  : Stellar secret key (S...) with funded balance
+//   - STELLAR_NETWORK  : testnet | mainnet | futurenet (default: testnet)
+//   - Stellar CLI installed; contracts built (`npm run compile:contracts`)
+//
+//   npm run deploy:contracts
 import "dotenv/config";
-import { ethers } from "ethers";
-import fs from "fs";
-import path from "path";
+import { execSync } from "node:child_process";
+import fs from "node:fs";
+import path from "node:path";
+import { Keypair } from "@stellar/stellar-sdk";
+
+interface NetworkCfg {
+  passphrase: string;
+  rpc: string;
+  horizon: string;
+  explorer: string;
+}
+
+const NETWORKS: Record<string, NetworkCfg> = {
+  testnet: {
+    passphrase: "Test SDF Network ; September 2015",
+    rpc: "https://soroban-testnet.stellar.org",
+    horizon: "https://horizon-testnet.stellar.org",
+    explorer: "https://stellar.expert/explorer/testnet",
+  },
+  mainnet: {
+    passphrase: "Public Global Stellar Network ; September 2015",
+    rpc: "https://mainnet.sorobanrpc.com",
+    horizon: "https://horizon.stellar.org",
+    explorer: "https://stellar.expert/explorer/public",
+  },
+  futurenet: {
+    passphrase: "Test SDF Future Network ; October 2022",
+    rpc: "https://rpc-futurenet.stellar.org",
+    horizon: "https://horizon-futurenet.stellar.org",
+    explorer: "https://stellar.expert/explorer/futurenet",
+  },
+};
+
+const WASM_DIR = "contracts/target/wasm32v1-none/release";
+
+function deployContract(
+  wasmFile: string,
+  secret: string,
+  net: NetworkCfg,
+  ctorArgs: string[] = [],
+): string {
+  const wasm = path.join(WASM_DIR, wasmFile);
+  if (!fs.existsSync(wasm)) {
+    throw new Error(`WASM not found: ${wasm}. Run \`npm run compile:contracts\` first.`);
+  }
+  const args = [
+    "stellar contract deploy",
+    `--wasm "${wasm}"`,
+    `--source-account ${secret}`,
+    `--rpc-url ${net.rpc}`,
+    `--network-passphrase "${net.passphrase}"`,
+    ctorArgs.length ? `-- ${ctorArgs.join(" ")}` : "",
+  ]
+    .filter(Boolean)
+    .join(" ");
+
+  // Logs go to our stderr; the contract id is the only thing on stdout.
+  const out = execSync(args, { stdio: ["ignore", "pipe", "inherit"] })
+    .toString()
+    .trim();
+  const contractId = out.split(/\s+/).filter(Boolean).pop() ?? "";
+  if (!/^C[A-Z2-7]{55}$/.test(contractId)) {
+    throw new Error(`Unexpected deploy output (no contract id): ${out}`);
+  }
+  return contractId;
+}
 
 async function main() {
-  const alchemyKey = process.env.ALCHEMY_API_KEY;
-  const privateKey = process.env.DEPLOYER_PRIVATE_KEY;
+  const secret = process.env.DEPLOYER_SECRET;
+  if (!secret) throw new Error("DEPLOYER_SECRET not set");
 
-  if (!alchemyKey) {
-    throw new Error("ALCHEMY_API_KEY not set");
-  }
-  if (!privateKey) {
-    throw new Error("DEPLOYER_PRIVATE_KEY not set");
-  }
+  const networkName = (process.env.STELLAR_NETWORK || "testnet").toLowerCase();
+  const net = NETWORKS[networkName];
+  if (!net) throw new Error(`Unknown STELLAR_NETWORK: ${networkName}`);
 
-  const rpcUrl = alchemyKey.startsWith("http")
-    ? alchemyKey
-    : `https://eth-sepolia.g.alchemy.com/v2/${alchemyKey}`;
-  const provider = new ethers.JsonRpcProvider(rpcUrl);
-  const wallet = new ethers.Wallet(privateKey, provider);
-
-  console.log("Deployer address:", wallet.address);
-
-  const balance = await provider.getBalance(wallet.address);
-  console.log("Balance:", ethers.formatEther(balance), "ETH");
-
-  if (balance === 0n) {
-    throw new Error("Deployer wallet has no ETH. Please fund it with Sepolia ETH from a faucet.");
-  }
-
-  const artifactsDir = path.resolve("contracts/artifacts");
-
-  const authorityArtifact = JSON.parse(
-    fs.readFileSync(path.join(artifactsDir, "KrydoAuthority.json"), "utf8")
-  );
-  const credentialsArtifact = JSON.parse(
-    fs.readFileSync(path.join(artifactsDir, "KrydoCredentials.json"), "utf8")
-  );
+  const deployer = Keypair.fromSecret(secret).publicKey();
+  console.log("Deployer:", deployer);
+  console.log("Network:", networkName);
 
   console.log("\nDeploying KrydoAuthority...");
-  const AuthorityFactory = new ethers.ContractFactory(
-    authorityArtifact.abi,
-    authorityArtifact.bytecode,
-    wallet
-  );
-  const authority = await AuthorityFactory.deploy();
-  await authority.waitForDeployment();
-  const authorityAddress = await authority.getAddress();
-  console.log("KrydoAuthority deployed at:", authorityAddress);
+  const authorityId = deployContract("krydo_authority.wasm", secret, net, [
+    `--root ${deployer}`,
+  ]);
+  console.log("KrydoAuthority:", authorityId);
 
   console.log("\nDeploying KrydoCredentials...");
-  const CredentialsFactory = new ethers.ContractFactory(
-    credentialsArtifact.abi,
-    credentialsArtifact.bytecode,
-    wallet
-  );
-  const credentialsContract = await CredentialsFactory.deploy(authorityAddress);
-  await credentialsContract.waitForDeployment();
-  const credentialsAddress = await credentialsContract.getAddress();
-  console.log("KrydoCredentials deployed at:", credentialsAddress);
+  const credentialsId = deployContract("krydo_credentials.wasm", secret, net, [
+    `--authority ${authorityId}`,
+  ]);
+  console.log("KrydoCredentials:", credentialsId);
 
-  const rootAuthority = await (authority as any).rootAuthority();
-  console.log("\nRoot Authority:", rootAuthority);
+  console.log("\nDeploying KrydoAudit...");
+  const auditId = deployContract("krydo_audit.wasm", secret, net);
+  console.log("KrydoAudit:", auditId);
 
   const deployment = {
-    network: "sepolia",
-    deployer: wallet.address,
+    network: networkName,
+    networkPassphrase: net.passphrase,
+    rpcUrl: net.rpc,
+    horizonUrl: net.horizon,
+    explorerUrl: net.explorer,
+    deployer,
     deployedAt: new Date().toISOString(),
     contracts: {
-      KrydoAuthority: {
-        address: authorityAddress,
-        abi: authorityArtifact.abi,
-      },
-      KrydoCredentials: {
-        address: credentialsAddress,
-        abi: credentialsArtifact.abi,
-      },
+      KrydoAuthority: { contractId: authorityId },
+      KrydoCredentials: { contractId: credentialsId },
+      KrydoAudit: { contractId: auditId },
     },
   };
 
   const deploymentPath = path.resolve("contracts/deployment.json");
-  fs.writeFileSync(deploymentPath, JSON.stringify(deployment, null, 2));
+  fs.writeFileSync(deploymentPath, JSON.stringify(deployment, null, 2) + "\n");
   console.log("\nDeployment info saved to:", deploymentPath);
 
   console.log("\n--- Deployment Summary ---");
-  console.log("Network: Sepolia");
-  console.log("KrydoAuthority:", authorityAddress);
-  console.log("KrydoCredentials:", credentialsAddress);
-  console.log("Root Authority:", rootAuthority);
-  console.log("Etherscan: https://sepolia.etherscan.io/address/" + authorityAddress);
-  console.log("Etherscan: https://sepolia.etherscan.io/address/" + credentialsAddress);
+  console.log("Network:", networkName);
+  console.log("KrydoAuthority:", `${net.explorer}/contract/${authorityId}`);
+  console.log("KrydoCredentials:", `${net.explorer}/contract/${credentialsId}`);
+  console.log("KrydoAudit:", `${net.explorer}/contract/${auditId}`);
 }
 
 main().catch((err) => {
