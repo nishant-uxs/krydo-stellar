@@ -103,6 +103,7 @@
     "@types/react-dom": "^18.3.1",
     "@types/supertest": "^7.2.0",
     "@types/ws": "^8.5.13",
+    "@vercel/node": "^5.8.22",
     "@vitejs/plugin-react": "^4.7.0",
     "@vitest/coverage-v8": "^4.1.4",
     "autoprefixer": "^10.4.20",
