@@ -39,12 +39,12 @@ import type { Credential, CredentialRequest } from "@shared/schema";
 import { shortenAddress } from "@/lib/wallet";
 import { TxSuccessDialog } from "@/components/tx-success-dialog";
 import { TxConfirmDialog, type TxConfirmInfo } from "@/components/tx-confirm-dialog";
-import { issueCredentialViaMetaMask, revokeCredentialViaMetaMask } from "@/lib/contracts";
+import { issueCredentialViaWallet, revokeCredentialViaWallet } from "@/lib/contracts";
 import { useState } from "react";
 import { motion } from "framer-motion";
 
 const issueCredentialSchema = z.object({
-  holderAddress: z.string().regex(/^0x[a-fA-F0-9]{40}$/, "Invalid wallet address"),
+  holderAddress: z.string().regex(/^G[A-Z2-7]{55}$/, "Invalid wallet address"),
   claimType: z.enum(claimTypes),
   claimSummary: z.string().min(1, "Summary is required").max(200),
   claimValue: z.string().min(1, "Claim value is required"),
@@ -81,7 +81,7 @@ export default function IssueCredentialPage() {
     mutationFn: async (params: { id: string; status: string; responseMessage?: string; claimSummary?: string; claimValue?: string; expiresAt?: string; onChainTxHash?: string }) => {
       const { id, status, ...body } = params;
 
-      // --- Rejection path: single POST, no MetaMask popup needed. ---------
+      // --- Rejection path: single POST, no Freighter popup needed. ---------
       // Server still anchors the rejection on-chain via its root wallet;
       // that's purely audit and doesn't require issuer consent.
       if (status === "rejected") {
@@ -93,14 +93,14 @@ export default function IssueCredentialPage() {
         return res.json();
       }
 
-      // --- Approval path: Full-SSI 3-step flow with MetaMask popup --------
+      // --- Approval path: Full-SSI 3-step flow with Freighter popup --------
       //  1. POST /respond with prepareOnly=true → server stages credential,
       //     returns canonical credentialHash, marks request "issuing".
-      //  2. Issuer signs issueCredential via MetaMask → real tx hash.
-      //  3a. PATCH /api/credentials/:id/tx → server verifies Sepolia receipt.
+      //  2. Issuer signs issueCredential via Freighter → real tx hash.
+      //  3a. PATCH /api/credentials/:id/tx → server verifies Stellar receipt.
       //  3b. POST /respond with finalize=true → server marks request "issued".
       //
-      // If the user rejects the MetaMask popup at step 2, the staged
+      // If the user rejects the Freighter popup at step 2, the staged
       // credential + request stay in "issuing" state. They can retry later
       // via the Re-anchor button on the Issued tab.
       setMutationStep("Staging credential...");
@@ -116,10 +116,10 @@ export default function IssueCredentialPage() {
         throw new Error("Server did not return a staged credential");
       }
 
-      setMutationStep("Waiting for MetaMask approval...");
+      setMutationStep("Waiting for Freighter approval...");
       let txResult: { txHash: string; blockNumber: number };
       try {
-        txResult = await issueCredentialViaMetaMask(
+        txResult = await issueCredentialViaWallet(
           credential.credentialHash,
           credential.holderAddress,
           credential.claimType,
@@ -127,12 +127,12 @@ export default function IssueCredentialPage() {
         );
       } catch (err: any) {
         if (err.code === 4001 || err.code === "ACTION_REJECTED") {
-          throw new Error("Transaction rejected in MetaMask. The credential is staged but not anchored — retry from the Pending tab.");
+          throw new Error("Transaction rejected in Freighter. The credential is staged but not anchored — retry from the Pending tab.");
         }
         throw err;
       }
 
-      setMutationStep("Confirming on Sepolia...");
+      setMutationStep("Confirming on Stellar...");
       try {
         await apiRequest("PATCH", `/api/credentials/${credential.id}/tx`, {
           txHash: txResult.txHash,
@@ -231,8 +231,8 @@ export default function IssueCredentialPage() {
       let blockNumber: number | undefined;
       let confirmWarning: string | undefined;
       try {
-        setMutationStep("Waiting for MetaMask approval...");
-        const txResult = await issueCredentialViaMetaMask(
+        setMutationStep("Waiting for Freighter approval...");
+        const txResult = await issueCredentialViaWallet(
           credential.credentialHash,
           data.holderAddress,
           data.claimType,
@@ -248,14 +248,14 @@ export default function IssueCredentialPage() {
       }
 
       // Hand the hash to the server so it can verify the receipt against
-      // Sepolia and persist the real block number. Previously we swallowed
+      // Stellar and persist the real block number. Previously we swallowed
       // errors here with `.catch(() => {})`, which meant a dropped /
       // wrong-chain / reverted tx would leave the UI permanently stuck on
       // the server's random placeholder hash. We now surface server-side
       // failures as a *warning* (the credential itself is already saved +
-      // MetaMask already confirmed locally) and the user can hit the
+      // Freighter already confirmed locally) and the user can hit the
       // Re-anchor button on the Issued tab to retry.
-      setMutationStep("Confirming on Sepolia...");
+      setMutationStep("Confirming on Stellar...");
       try {
         const patchRes = await apiRequest(
           "PATCH",
@@ -288,7 +288,7 @@ export default function IssueCredentialPage() {
       if (data.confirmWarning) {
         toast({
           title: "Credential issued — confirmation pending",
-          description: "MetaMask confirmed the tx, but the server could not verify it yet. Use Re-anchor on the Issued tab if this persists.",
+          description: "Freighter confirmed the tx, but the server could not verify it yet. Use Re-anchor on the Issued tab if this persists.",
           variant: "destructive",
         });
       }
@@ -310,10 +310,10 @@ export default function IssueCredentialPage() {
   // was never confirmed (legacy records from before the PATCH endpoint
   // started verifying receipts, or records where the user's wallet dropped
   // the tx). The server signs + submits from its root wallet so the user
-  // doesn't need to open MetaMask; endpoint is idempotent.
+  // doesn't need to open Freighter; endpoint is idempotent.
   const reanchorMutation = useMutation({
     mutationFn: async (credId: string) => {
-      setMutationStep("Re-anchoring on Sepolia...");
+      setMutationStep("Re-anchoring on Stellar...");
       const res = await apiRequest("POST", `/api/credentials/${credId}/anchor`, {});
       return res.json();
     },
@@ -325,7 +325,7 @@ export default function IssueCredentialPage() {
       if (data.alreadyOnChain) {
         toast({
           title: "Already on-chain",
-          description: "This credential is already verified on Sepolia.",
+          description: "This credential is already verified on Stellar.",
         });
         return;
       }
@@ -333,7 +333,7 @@ export default function IssueCredentialPage() {
         txHash: data.txHash,
         blockNumber: String(data.blockNumber),
         title: "Credential Re-anchored",
-        description: "The credential is now verified on the Sepolia blockchain.",
+        description: "The credential is now verified on the Stellar network.",
       });
       setTxDialogOpen(true);
     },
@@ -348,16 +348,16 @@ export default function IssueCredentialPage() {
       const credData = issuedCredentials?.find((c) => c.id === credId);
       if (!credData) throw new Error("Credential not found");
 
-      setMutationStep("Waiting for MetaMask approval...");
+      setMutationStep("Waiting for Freighter approval...");
       let onChainTxHash: string | undefined;
       let blockNumber: number | undefined;
       try {
-        const txResult = await revokeCredentialViaMetaMask(credData.credentialHash);
+        const txResult = await revokeCredentialViaWallet(credData.credentialHash);
         onChainTxHash = txResult.txHash;
         blockNumber = txResult.blockNumber;
       } catch (err: any) {
         if (err.code === 4001 || err.code === "ACTION_REJECTED") {
-          throw new Error("Transaction rejected in MetaMask");
+          throw new Error("Transaction rejected in Freighter");
         }
         throw err;
       }
@@ -441,14 +441,14 @@ export default function IssueCredentialPage() {
                 setConfirmInfo({
                   action: "issue_credential",
                   title: "Issue New Credential",
-                  description: "This will save the credential, then open MetaMask to record it on the Sepolia blockchain.",
+                  description: "This will save the credential, then open Freighter to record it on the Stellar network.",
                   details: [
                     { label: "Action", value: "Issue Credential On-Chain" },
                     { label: "Type", value: claimTypeLabels[data.claimType] || data.claimType },
                     { label: "Holder", value: data.holderAddress, mono: true },
                     { label: "Summary", value: data.claimSummary },
                     { label: "Contract", value: "KrydoCredentials", mono: true },
-                    { label: "Network", value: "Sepolia Testnet" },
+                    { label: "Network", value: "Stellar Testnet" },
                   ],
                 });
                 setPendingAction(() => () => issueMutation.mutate(data));
@@ -464,7 +464,7 @@ export default function IssueCredentialPage() {
                     <FormLabel>Holder Wallet Address</FormLabel>
                     <FormControl>
                       <Input
-                        placeholder="0x..."
+                        placeholder="G..."
                         className="font-mono text-sm"
                         data-testid="input-holder-address"
                         {...field}
@@ -780,14 +780,14 @@ export default function IssueCredentialPage() {
                               setConfirmInfo({
                                 action: "revoke_credential",
                                 title: "Revoke Credential",
-                                description: "This will permanently revoke this credential on the Sepolia blockchain.",
+                                description: "This will permanently revoke this credential on the Stellar network.",
                                 details: [
                                   { label: "Action", value: "Revoke Credential On-Chain" },
                                   { label: "Type", value: claimTypeLabels[cred.claimType as keyof typeof claimTypeLabels] || cred.claimType },
                                   { label: "Holder", value: cred.holderAddress, mono: true },
                                   { label: "Hash", value: cred.credentialHash.slice(0, 20) + "...", mono: true },
                                   { label: "Contract", value: "KrydoCredentials", mono: true },
-                                  { label: "Network", value: "Sepolia Testnet" },
+                                  { label: "Network", value: "Stellar Testnet" },
                                 ],
                                 warning: "This action is irreversible. The credential will be marked as revoked on-chain.",
                               });

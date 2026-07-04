@@ -7,6 +7,7 @@ import { Shield, Users, FileCheck, Activity, TrendingUp, Clock, Link2 } from "lu
 import type { Issuer, Credential, Transaction } from "@shared/schema";
 import { isOffChainTx } from "@shared/schema";
 import { motion } from "framer-motion";
+import { explorerTxUrl, NETWORK_LABEL } from "@/lib/stellar";
 
 const fadeUp = {
   initial: { opacity: 0, y: 12 },
@@ -41,7 +42,7 @@ export default function Dashboard() {
   const { data: network } = useQuery<{
     blockchain: boolean;
     network: string | null;
-    contracts: { authority: string; credentials: string } | null;
+    contracts: { authority: string; credentials: string; audit: string | null } | null;
     deployer: string | null;
   }>({
     queryKey: ["/api/network"],
@@ -72,12 +73,12 @@ export default function Dashboard() {
           {network?.blockchain && (
             <Badge variant="secondary" className="text-[10px] bg-chart-3/15 text-chart-3 no-default-active-elevate shrink-0" data-testid="badge-network-status">
               <Link2 className="w-3 h-3 mr-1" />
-              Sepolia
+              Stellar {NETWORK_LABEL}
             </Badge>
           )}
           {onChainTxHash && (
             <a
-              href={`https://sepolia.etherscan.io/tx/${onChainTxHash}`}
+              href={explorerTxUrl(onChainTxHash)}
               target="_blank"
               rel="noopener noreferrer"
               data-testid="link-role-onchain"
@@ -199,7 +200,7 @@ export default function Dashboard() {
                           <p className="text-sm font-medium capitalize">{tx.action.replace(/_/g, " ")}</p>
                           {!offChain && (
                             <a
-                              href={`https://sepolia.etherscan.io/tx/${tx.txHash}`}
+                              href={explorerTxUrl(tx.txHash)}
                               target="_blank"
                               rel="noopener noreferrer"
                               data-testid={`link-tx-onchain-${tx.id}`}
@@ -221,7 +222,7 @@ export default function Dashboard() {
                           </span>
                         ) : (
                           <a
-                            href={`https://sepolia.etherscan.io/tx/${tx.txHash}`}
+                            href={explorerTxUrl(tx.txHash)}
                             target="_blank"
                             rel="noopener noreferrer"
                             className="font-mono text-[11px] text-muted-foreground truncate block hover:text-foreground transition-colors"

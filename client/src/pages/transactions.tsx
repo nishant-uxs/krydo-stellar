@@ -7,8 +7,7 @@ import { Activity, ArrowUpRight, ArrowDownLeft, ExternalLink, Link2 } from "luci
 import type { Transaction } from "@shared/schema";
 import { isOffChainTx } from "@shared/schema";
 import { motion } from "framer-motion";
-
-const ETHERSCAN_BASE = "https://sepolia.etherscan.io";
+import { explorerTxUrl, explorerAccountUrl, NETWORK_LABEL } from "@/lib/stellar";
 
 const actionColors: Record<string, string> = {
   issuer_approved: "bg-chart-3/15 text-chart-3",
@@ -33,7 +32,7 @@ export default function TransactionsPage() {
           Transaction Log
         </h1>
         <p className="text-sm text-muted-foreground mt-1">
-          On-chain transaction history verified on Sepolia testnet
+          On-chain transaction history verified on Stellar {NETWORK_LABEL}
         </p>
       </div>
 
@@ -77,7 +76,7 @@ export default function TransactionsPage() {
                               variant="secondary"
                               className={`text-[10px] no-default-active-elevate ${actionColors[tx.action] || ""}`}
                             >
-                              Block #{tx.blockNumber}
+                              Ledger #{tx.blockNumber}
                             </Badge>
                             {isOnChain && (
                               <Badge variant="secondary" className="text-[10px] bg-primary/10 text-primary no-default-active-elevate">
@@ -89,7 +88,7 @@ export default function TransactionsPage() {
                           <div className="flex items-center gap-2 mt-0.5 flex-wrap">
                             {isOnChain ? (
                               <a
-                                href={`${ETHERSCAN_BASE}/tx/${tx.txHash}`}
+                                href={explorerTxUrl(tx.txHash)}
                                 target="_blank"
                                 rel="noopener noreferrer"
                                 className="font-mono text-[11px] text-muted-foreground hover:text-primary transition-colors inline-flex items-center gap-1"
@@ -106,7 +105,7 @@ export default function TransactionsPage() {
                             <span className="text-[11px] text-muted-foreground">
                               from{" "}
                               <a
-                                href={`${ETHERSCAN_BASE}/address/${tx.fromAddress}`}
+                                href={explorerAccountUrl(tx.fromAddress)}
                                 target="_blank"
                                 rel="noopener noreferrer"
                                 className="hover:text-primary transition-colors"
@@ -118,7 +117,7 @@ export default function TransactionsPage() {
                               <span className="text-[11px] text-muted-foreground">
                                 to{" "}
                                 <a
-                                  href={`${ETHERSCAN_BASE}/address/${tx.toAddress}`}
+                                  href={explorerAccountUrl(tx.toAddress)}
                                   target="_blank"
                                   rel="noopener noreferrer"
                                   className="hover:text-primary transition-colors"

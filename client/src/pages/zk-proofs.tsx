@@ -168,7 +168,7 @@ export default function ZkProofsPage() {
         body.selectedFields = selectedFields;
       }
 
-      // ZK proofs are generated off-chain — no MetaMask popup, no on-chain
+      // ZK proofs are generated off-chain — no Freighter popup, no on-chain
       // anchor. The holder can share the proof with verifiers directly.
       const res = await apiRequest("POST", "/api/zk/generate", body);
       return await res.json();
@@ -487,7 +487,7 @@ export default function ZkProofsPage() {
                             <Badge
                               variant="secondary"
                               className="text-[10px] bg-chart-1/15 text-chart-1 no-default-active-elevate cursor-pointer"
-                              onClick={() => window.open(`https://sepolia.etherscan.io/tx/${proof.onChainTxHash}`, "_blank")}
+                              onClick={() => window.open(`https://stellar.expert/explorer/testnet/tx/${proof.onChainTxHash}`, "_blank")}
                               data-testid={`badge-onchain-${proof.id}`}
                             >
                               <Link2 className="w-2.5 h-2.5 mr-0.5" />

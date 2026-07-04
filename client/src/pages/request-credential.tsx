@@ -47,7 +47,7 @@ import {
 import type { Issuer, CredentialRequest } from "@shared/schema";
 import { useState, useMemo } from "react";
 import { motion } from "framer-motion";
-import { anchorCredentialRequestViaMetaMask } from "@/lib/contracts";
+import { anchorCredentialRequestViaWallet } from "@/lib/contracts";
 
 export default function RequestCredentialPage() {
   const { address } = useWallet();
@@ -105,19 +105,19 @@ export default function RequestCredentialPage() {
       });
       const request = await res.json();
 
-      // Step 2: MetaMask popup — holder signs a self-tx with encoded
-      // KRYDO_CRED_REQUEST_V1 payload to anchor the request on Sepolia.
-      setReqStep("Waiting for MetaMask approval...");
+      // Step 2: Freighter popup — holder signs a self-tx with encoded
+      // KRYDO_CRED_REQUEST_V1 payload to anchor the request on Stellar.
+      setReqStep("Waiting for Freighter approval...");
       let txResult: { txHash: string; blockNumber: number };
       try {
-        txResult = await anchorCredentialRequestViaMetaMask(
+        txResult = await anchorCredentialRequestViaWallet(
           request.id,
           address!,
           selectedClaimType,
           "request_created",
         );
       } catch (err: any) {
-        // MetaMask cancel / rejection — roll back the pending request on
+        // Freighter cancel / rejection — roll back the pending request on
         // the server so the issuer never sees an un-anchored, un-consented
         // request. Any other error also rolls back to keep the UI
         // consistent with the user's intent.
@@ -136,8 +136,8 @@ export default function RequestCredentialPage() {
       }
 
       // Step 3: POST anchor tx hash to server — server verifies the
-      // Sepolia receipt and persists it against the request.
-      setReqStep("Recording anchor on Sepolia...");
+      // Stellar receipt and persists it against the request.
+      setReqStep("Recording anchor on Stellar...");
       try {
         await apiRequest("POST", `/api/credential-requests/${request.id}/anchor`, {
           txHash: txResult.txHash,
@@ -329,7 +329,7 @@ export default function RequestCredentialPage() {
                             </Badge>
                             {req.onChainTxHash && (
                               <a
-                                href={`https://sepolia.etherscan.io/tx/${req.onChainTxHash}`}
+                                href={`https://stellar.expert/explorer/testnet/tx/${req.onChainTxHash}`}
                                 target="_blank"
                                 rel="noopener noreferrer"
                                 data-testid={`link-request-onchain-${req.id}`}

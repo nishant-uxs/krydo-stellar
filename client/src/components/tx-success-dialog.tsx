@@ -9,8 +9,7 @@ import { Button } from "@/components/ui/button";
 import { CheckCircle2, ExternalLink, Copy, Check } from "lucide-react";
 import { useState } from "react";
 import { motion, AnimatePresence } from "framer-motion";
-
-const ETHERSCAN_BASE = "https://sepolia.etherscan.io";
+import { explorerTxUrl, NETWORK_LABEL } from "@/lib/stellar";
 
 interface TxSuccessDialogProps {
   open: boolean;
@@ -30,7 +29,7 @@ export function TxSuccessDialog({
   description,
 }: TxSuccessDialogProps) {
   const [copied, setCopied] = useState(false);
-  const isOnChain = txHash && !txHash.startsWith("0x000");
+  const isOnChain = !!txHash && !/^0+$/.test(txHash);
 
   const copyHash = () => {
     navigator.clipboard.writeText(txHash);
@@ -84,7 +83,7 @@ export function TxSuccessDialog({
             {blockNumber && (
               <div>
                 <p className="text-[11px] uppercase tracking-wider text-muted-foreground mb-1">
-                  Block Number
+                  Ledger
                 </p>
                 <p className="font-mono text-xs" data-testid="text-block-number">#{blockNumber}</p>
               </div>
@@ -94,7 +93,7 @@ export function TxSuccessDialog({
               <p className="text-[11px] uppercase tracking-wider text-muted-foreground mb-1">
                 Network
               </p>
-              <p className="text-xs">Sepolia Testnet</p>
+              <p className="text-xs">Stellar {NETWORK_LABEL}</p>
             </div>
           </div>
 
@@ -104,15 +103,15 @@ export function TxSuccessDialog({
                 variant="outline"
                 className="flex-1"
                 asChild
-                data-testid="button-view-etherscan"
+                data-testid="button-view-explorer"
               >
                 <a
-                  href={`${ETHERSCAN_BASE}/tx/${txHash}`}
+                  href={explorerTxUrl(txHash)}
                   target="_blank"
                   rel="noopener noreferrer"
                 >
                   <ExternalLink className="w-4 h-4 mr-2" />
-                  View on Etherscan
+                  View on Stellar Expert
                 </a>
               </Button>
             )}

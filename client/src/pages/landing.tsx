@@ -5,7 +5,7 @@ import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { ThemeToggle } from "@/components/theme-toggle";
 import { Shield, Lock, Eye, ArrowRight, Wallet, Layers, CheckCircle2, Network } from "lucide-react";
-import { SiEthereum } from "react-icons/si";
+import { SiStellar } from "react-icons/si";
 import { motion } from "framer-motion";
 
 const fadeUp = {
@@ -26,9 +26,8 @@ export default function Landing() {
     if (isConnected) navigate("/dashboard");
   }, [isConnected, navigate]);
 
-  // RainbowKit's modal handles wallet selection (MetaMask, WalletConnect,
-  // Coinbase, Rainbow, Rabby, injected, etc.) and the "no wallet installed"
-  // case on its own — so we just delegate.
+  // Freighter handles wallet access + the "not installed" case; we delegate to
+  // the WalletProvider's connect(), which runs the Sign-in-with-Stellar flow.
   const handleConnectClick = () => {
     connect();
   };
@@ -44,7 +43,7 @@ export default function Landing() {
           <div className="flex items-center gap-2">
             <ThemeToggle />
             <Button onClick={handleConnectClick} disabled={isConnecting} data-testid="button-hero-connect">
-              <SiEthereum className="w-4 h-4 mr-2" />
+              <SiStellar className="w-4 h-4 mr-2" />
               {isConnecting ? "Signing in..." : "Connect Wallet"}
             </Button>
           </div>
@@ -81,7 +80,7 @@ export default function Landing() {
             </motion.p>
             <motion.div className="flex flex-wrap items-center gap-3" variants={fadeUp}>
               <Button size="lg" onClick={handleConnectClick} disabled={isConnecting} data-testid="button-cta-connect">
-                <SiEthereum className="w-4 h-4 mr-2" />
+                <SiStellar className="w-4 h-4 mr-2" />
                 {isConnecting ? "Signing in..." : "Connect Wallet"}
                 <ArrowRight className="w-4 h-4 ml-2" />
               </Button>

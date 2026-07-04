@@ -9,7 +9,7 @@ import {
 } from "@/components/ui/dropdown-menu";
 import { Badge } from "@/components/ui/badge";
 import { LogOut, Copy, Check } from "lucide-react";
-import { SiEthereum } from "react-icons/si";
+import { SiStellar } from "react-icons/si";
 import { useState } from "react";
 
 export function WalletButton() {
@@ -31,7 +31,7 @@ export function WalletButton() {
         disabled={isConnecting}
         data-testid="button-connect-wallet"
       >
-        <SiEthereum className="w-4 h-4 mr-2" />
+        <SiStellar className="w-4 h-4 mr-2" />
         {isConnecting ? "Signing in..." : "Connect Wallet"}
       </Button>
     );
@@ -48,7 +48,7 @@ export function WalletButton() {
       <DropdownMenuTrigger asChild>
         <Button variant="outline" data-testid="button-wallet-menu">
           <div className="flex items-center gap-2">
-            <SiEthereum className="w-3 h-3 text-primary" />
+            <SiStellar className="w-3 h-3 text-primary" />
             <span className="font-mono text-xs">{shortenAddress(address!)}</span>
             <Badge variant="secondary" className={`text-[10px] px-1.5 py-0 no-default-active-elevate ${roleColors[role || "user"]}`}>
               {role}
@@ -59,7 +59,7 @@ export function WalletButton() {
       <DropdownMenuContent align="end" className="w-64">
         <div className="px-3 py-2">
           <div className="flex items-center gap-1.5 mb-1">
-            <SiEthereum className="w-3 h-3 text-muted-foreground" />
+            <SiStellar className="w-3 h-3 text-muted-foreground" />
             <p className="text-xs text-muted-foreground">Connected Wallet</p>
           </div>
           <p className="font-mono text-xs mt-1 break-all">{address}</p>

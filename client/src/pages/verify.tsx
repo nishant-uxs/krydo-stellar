@@ -158,7 +158,7 @@ function CredentialResult({ result }: { result: VerificationResult }) {
                 <div>
                   <p className="text-xs text-muted-foreground mb-0.5">Blockchain Verification</p>
                   {result.onChain ? (
-                    <Badge variant="secondary" className="text-[10px] bg-chart-3/15 text-chart-3 no-default-active-elevate" data-testid="badge-onchain-verified">Verified on Sepolia</Badge>
+                    <Badge variant="secondary" className="text-[10px] bg-chart-3/15 text-chart-3 no-default-active-elevate" data-testid="badge-onchain-verified">Verified on Stellar</Badge>
                   ) : (
                     <Badge variant="secondary" className="text-[10px] bg-muted text-muted-foreground no-default-active-elevate" data-testid="badge-offchain">Off-chain only</Badge>
                   )}
@@ -290,7 +290,7 @@ function ZkProofResult({ zkResult }: { zkResult: ZkVerificationResult }) {
                 <div>
                   <p className="text-xs text-muted-foreground mb-0.5">On-Chain Proof Anchor</p>
                   <a
-                    href={`https://sepolia.etherscan.io/tx/${zkResult.proof.onChainTxHash}`}
+                    href={`https://stellar.expert/explorer/testnet/tx/${zkResult.proof.onChainTxHash}`}
                     target="_blank"
                     rel="noreferrer"
                     className="font-mono text-xs text-chart-1 hover:underline break-all"
@@ -311,7 +311,7 @@ function ZkProofResult({ zkResult }: { zkResult: ZkVerificationResult }) {
                     className={`text-[10px] no-default-active-elevate ${zkResult.onChainVerified ? "bg-chart-3/15 text-chart-3" : "bg-destructive/15 text-destructive"}`}
                     data-testid="badge-onchain-cred-status"
                   >
-                    {zkResult.onChainVerified ? "Verified on Sepolia" : "Not verified on-chain"}
+                    {zkResult.onChainVerified ? "Verified on Stellar" : "Not verified on-chain"}
                   </Badge>
                 </div>
               </div>
@@ -331,7 +331,7 @@ function ZkProofResult({ zkResult }: { zkResult: ZkVerificationResult }) {
             <div className="p-3 rounded-md bg-chart-3/10 border border-chart-3/20">
               <p className="text-xs text-chart-3">
                 This proof cryptographically confirms the claim satisfies the stated condition. The actual credential value was never exposed during verification.
-                {zkResult.proof.onChainTxHash && " Proof commitment is anchored on Sepolia testnet."}
+                {zkResult.proof.onChainTxHash && " Proof commitment is anchored on Stellar Testnet."}
                 {zkResult.onChainVerified && " Underlying credential is verified on-chain."}
               </p>
             </div>
@@ -449,7 +449,7 @@ export default function VerifyPage() {
                         <FormLabel>Credential Hash or ID</FormLabel>
                         <FormControl>
                           <Input
-                            placeholder="0x... or credential ID"
+                            placeholder="hash or credential ID"
                             className="font-mono text-sm"
                             data-testid="input-verify-hash"
                             {...field}

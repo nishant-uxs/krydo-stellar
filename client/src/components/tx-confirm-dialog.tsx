@@ -71,9 +71,9 @@ export function TxConfirmDialog({ open, onOpenChange, info, onConfirm, isPending
           <div className="flex items-center gap-2 p-3 rounded-md bg-chart-1/10 border border-chart-1/20">
             <Wallet className="w-4 h-4 text-chart-1 shrink-0" />
             <div>
-              <p className="text-xs font-medium text-chart-1">MetaMask will open next</p>
+              <p className="text-xs font-medium text-chart-1">Freighter will open next</p>
               <p className="text-[11px] text-chart-1/80">
-                Review and confirm the transaction in your MetaMask wallet. Gas fees apply on Sepolia testnet.
+                Review and sign the transaction in your Freighter wallet. Stellar network fees are a fraction of a cent.
               </p>
             </div>
           </div>
@@ -99,7 +99,7 @@ export function TxConfirmDialog({ open, onOpenChange, info, onConfirm, isPending
             ) : (
               <>
                 <ArrowRight className="w-4 h-4 mr-2" />
-                Proceed to MetaMask
+                Proceed to Freighter
               </>
             )}
           </Button>

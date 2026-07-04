@@ -39,15 +39,15 @@ import { shortenAddress } from "@/lib/wallet";
 import { issuerCategories, issuerCategoryLabels, type IssuerCategory } from "@shared/schema";
 import { TxSuccessDialog } from "@/components/tx-success-dialog";
 import { TxConfirmDialog, type TxConfirmInfo } from "@/components/tx-confirm-dialog";
-import { addIssuerViaMetaMask, revokeIssuerViaMetaMask } from "@/lib/contracts";
+import { addIssuerViaWallet, revokeIssuerViaWallet } from "@/lib/contracts";
+import { explorerAccountUrl } from "@/lib/stellar";
 import type { Issuer } from "@shared/schema";
 import { useState } from "react";
 import { motion } from "framer-motion";
 
-const ETHERSCAN_BASE = "https://sepolia.etherscan.io";
 
 const addIssuerSchema = z.object({
-  walletAddress: z.string().regex(/^0x[a-fA-F0-9]{40}$/, "Invalid wallet address"),
+  walletAddress: z.string().regex(/^G[A-Z2-7]{55}$/, "Invalid wallet address"),
   name: z.string().min(1, "Name is required").max(100),
   description: z.string().max(500).optional(),
   category: z.enum(issuerCategories),
@@ -81,14 +81,14 @@ export default function IssuersPage() {
       let onChainTxHash: string | undefined;
       let blockNumber: number | undefined;
       try {
-        setMutationStep("Approve in MetaMask...");
-        const txResult = await addIssuerViaMetaMask(data.walletAddress, data.name);
+        setMutationStep("Approve in Freighter...");
+        const txResult = await addIssuerViaWallet(data.walletAddress, data.name);
         onChainTxHash = txResult.txHash;
         blockNumber = txResult.blockNumber;
-        setMutationStep("Confirming on Sepolia...");
+        setMutationStep("Confirming on Stellar...");
       } catch (err: any) {
         if (err.code === 4001 || err.code === "ACTION_REJECTED") {
-          throw new Error("Transaction rejected in MetaMask");
+          throw new Error("Transaction rejected in Freighter");
         }
         throw err;
       }
@@ -131,16 +131,16 @@ export default function IssuersPage() {
       const issuerData = issuers?.find((i) => i.id === issuerId);
       if (!issuerData) throw new Error("Issuer not found");
 
-      setMutationStep("Waiting for MetaMask approval...");
+      setMutationStep("Waiting for Freighter approval...");
       let onChainTxHash: string | undefined;
       let blockNumber: number | undefined;
       try {
-        const txResult = await revokeIssuerViaMetaMask(issuerData.walletAddress);
+        const txResult = await revokeIssuerViaWallet(issuerData.walletAddress);
         onChainTxHash = txResult.txHash;
         blockNumber = txResult.blockNumber;
       } catch (err: any) {
         if (err.code === 4001 || err.code === "ACTION_REJECTED") {
-          throw new Error("Transaction rejected in MetaMask");
+          throw new Error("Transaction rejected in Freighter");
         }
         throw err;
       }
@@ -192,7 +192,7 @@ export default function IssuersPage() {
             Manage Issuers
           </h1>
           <p className="text-sm text-muted-foreground mt-1">
-            Approve and revoke trusted institutions on-chain (Sepolia)
+            Approve and revoke trusted institutions on-chain (Stellar)
           </p>
         </div>
         <Dialog open={dialogOpen} onOpenChange={setDialogOpen}>
@@ -206,7 +206,7 @@ export default function IssuersPage() {
             <DialogHeader>
               <DialogTitle className="font-serif">Approve New Issuer</DialogTitle>
               <DialogDescription>
-                This will submit a transaction to the KrydoAuthority contract on Sepolia.
+                This will submit a transaction to the KrydoAuthority contract on Stellar.
               </DialogDescription>
             </DialogHeader>
             <Form {...form}>
@@ -216,13 +216,13 @@ export default function IssuersPage() {
                   setConfirmInfo({
                     action: "add_issuer",
                     title: "Authorize New Issuer",
-                    description: "This will register the institution as a trusted issuer on the Sepolia blockchain.",
+                    description: "This will register the institution as a trusted issuer on the Stellar network.",
                     details: [
                       { label: "Action", value: "Add Issuer to Trust Network" },
                       { label: "Institution", value: data.name },
                       { label: "Wallet", value: data.walletAddress, mono: true },
                       { label: "Contract", value: "KrydoAuthority", mono: true },
-                      { label: "Network", value: "Sepolia Testnet" },
+                      { label: "Network", value: "Stellar Testnet" },
                     ],
                   });
                   setPendingAction(() => () => addIssuerMutation.mutate(data));
@@ -238,7 +238,7 @@ export default function IssuersPage() {
                       <FormLabel>Wallet Address</FormLabel>
                       <FormControl>
                         <Input
-                          placeholder="0x..."
+                          placeholder="G..."
                           className="font-mono text-sm"
                           data-testid="input-issuer-address"
                           {...field}
@@ -370,7 +370,7 @@ export default function IssuersPage() {
                         )}
                       </div>
                       <a
-                        href={`${ETHERSCAN_BASE}/address/${issuer.walletAddress}`}
+                        href={explorerAccountUrl(issuer.walletAddress)}
                         target="_blank"
                         rel="noopener noreferrer"
                         className="font-mono text-xs text-muted-foreground hover:text-primary transition-colors inline-flex items-center gap-1 mb-1"
@@ -409,7 +409,7 @@ export default function IssuersPage() {
                               { label: "Institution", value: issuer.name },
                               { label: "Wallet", value: issuer.walletAddress, mono: true },
                               { label: "Contract", value: "KrydoAuthority", mono: true },
-                              { label: "Network", value: "Sepolia Testnet" },
+                              { label: "Network", value: "Stellar Testnet" },
                             ],
                             warning: "All credentials issued by this institution will remain valid, but they cannot issue new ones.",
                           });
