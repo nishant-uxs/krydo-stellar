@@ -1,0 +1,18 @@
+[workspace]
+resolver = "2"
+members = ["authority", "credentials", "audit"]
+
+[workspace.dependencies]
+soroban-sdk = "25.3.1"
+
+# Release profile tuned for on-chain WASM: small, deterministic, no panics that
+# unwind. These flags are the Soroban-recommended defaults for mainnet builds.
+[profile.release]
+opt-level = "z"
+overflow-checks = true
+debug = 0
+strip = "symbols"
+debug-assertions = false
+panic = "abort"
+codegen-units = 1
+lto = true
