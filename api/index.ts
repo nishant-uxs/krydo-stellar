@@ -1,19 +1,16 @@
 import type { VercelRequest, VercelResponse } from "@vercel/node";
 import type { Request, Response } from "express";
 import type { Express } from "express";
-import { createApp } from "../server/createApp";
+import { createRequire } from "node:module";
 
 /**
- * Ensure the serverless bundle includes the Express app + shared contracts
- * metadata (Vercel NFT does not always follow ../server imports).
+ * Pre-bundled by `npm run build` (esbuild → api/app.bundle.cjs).
+ * Avoids Vercel NFT failing to package ../server/*.ts sources.
  */
-export const config = {
-  includeFiles: [
-    "server/**",
-    "shared/**",
-    "contracts/deployment.json",
-  ],
-  maxDuration: 30,
+const require = createRequire(import.meta.url);
+// eslint-disable-next-line @typescript-eslint/no-require-imports
+const { createApp } = require("./app.bundle.cjs") as {
+  createApp: (opts?: { serveStaticFiles?: boolean }) => Promise<{ app: Express }>;
 };
 
 let app: Express | null = null;
