@@ -37,15 +37,15 @@
 
 ## 1. System overview
 
-Krydo is a three-tier trust network sitting on top of the Stellar network (Soroban smart contracts on Stellar Testnet), backed by a Node/Express API and a React SPA. The client never talks to Firestore directly; every read/write is mediated by the server. Every mutation that touches state the public should be able to audit is either anchored on-chain by the acting wallet, or emits a server-side on-chain transaction signed by the root deployer.
+Krydo is a three-tier trust network sitting on top of the Stellar network (Soroban smart contracts on Stellar Testnet), backed by a Node/Express API and a React SPA. The client never talks to Firestore directly; every read/write is mediated by the server. **Every mutation that must be auditable on-chain is signed by the acting user's wallet** after an in-app confirm dialog. The server `DEPLOYER_SECRET` is used to deploy contracts, identify the root authority, and simulate/read RPC calls — not to sign issuer/holder transactions.
 
 ```mermaid
 flowchart LR
     subgraph Client["Client (browser)"]
         UI["React SPA<br/>(Vite, shadcn/ui)"]
-        FRT["Freighter<br/>(@stellar/freighter-api)"]
+        KIT["Stellar Wallets Kit<br/>(Freighter, xBull, Lobstr, …)"]
         ZKC["zk-engine (client mirror)"]
-        UI --> FRT
+        UI --> KIT
         UI --> ZKC
     end
 
@@ -74,7 +74,7 @@ flowchart LR
     end
 
     UI -- "HTTPS + JWT" --> API
-    FRT -. "Freighter sign tx" .-> Chain
+    KIT -. "wallet signMessage / signTransaction" .-> Chain
     STORE <--> FS
     BC <--> Chain
 
@@ -82,7 +82,7 @@ flowchart LR
     classDef server fill:#0f172a,stroke:#a78bfa,color:#e2e8f0
     classDef data fill:#0f172a,stroke:#f59e0b,color:#fde68a
     classDef chain fill:#0f172a,stroke:#10b981,color:#bbf7d0
-    class UI,FRT,ZKC client
+    class UI,KIT,ZKC client
     class API,AUTHM,VAL,ZKE,STORE,BC server
     class FS data
     class KA,KC,KAU chain
@@ -99,7 +99,7 @@ flowchart LR
     end
     subgraph StateChange["State-changing actions"]
         W["POST/PATCH/DELETE /api/..."] --> Z["Zod validate"] --> A["Auth / role gate"] --> T["Two-phase commit"]
-        T --> ANC["on-chain anchor<br/>(issuer wallet or server)"]
+        T --> ANC["on-chain anchor<br/>(acting user's wallet)"]
         T --> PST["Firestore mirror"]
     end
 ```
@@ -154,6 +154,8 @@ flowchart TB
 | Holder      | Accept credentials, generate ZK proofs, revoke own   | Mint credentials, whitelist issuers        |
 | Verifier    | Verify shared proofs, inspect public anchors         | Read holder PII; see underlying values     |
 
+`GET /api/issuers` prefers the live `KrydoAuthority` whitelist (`get_issuers` / `get_issuer_info`) when the chain is readable, and upserts/mirrors those rows into Firestore. Legacy non-Stellar (`0x…`) issuer rows are filtered out.
+
 ---
 
 ## 3. Smart-contract architecture
@@ -203,7 +205,7 @@ Soroban charges Stellar network fees rather than per-opcode gas. In practice eac
 
 ### Why a separate `KrydoAudit` contract?
 
-Rather than scatter ad-hoc payload-carrying transactions, Krydo routes holder-signed anchor events (credential requests, ZK proof anchors, role assignments) through a minimal state-free contract call. This turns them into first-class Soroban transactions the wallet (Freighter) will sign and simulate normally, and gives every off-chain action a uniform on-chain provenance record. The contract stores nothing; it just emits an `Anchor(sender, kind, id, data, timestamp)` event indexed for cheap queries.
+Rather than scatter ad-hoc payload-carrying transactions, Krydo routes holder-signed anchor events (credential requests, ZK proof anchors, role assignments) through a minimal state-free contract call. This turns them into first-class Soroban transactions the wallet (via Stellar Wallets Kit) will sign and simulate normally, and gives every off-chain action a uniform on-chain provenance record. The contract stores nothing; it just emits an `Anchor(sender, kind, id, data, timestamp)` event indexed for cheap queries.
 
 ---
 
@@ -230,9 +232,10 @@ flowchart LR
     SERVER --> SRV_MISC["blockchain.ts<br/>storage.ts<br/>zk-engine.ts"]
 
     SHARED --> S_SCHEMA["schema.ts<br/>(types + zod)"]
-    SHARED --> S_CLAIMS["claim-schemas.ts"]
+    SHARED --> S_CLAIMS["claim-schemas.ts<br/>claim-consistency.ts"]
     SHARED --> S_VC["vc.ts<br/>(W3C VC export)"]
     SHARED --> S_CONT["contracts.ts<br/>(contract IDs + metadata)"]
+    SHARED --> S_SEP["sep53.ts"]
 
     CONTRACTS --> C_SOL["authority/ credentials/ audit/<br/>(Rust crates)"]
     CONTRACTS --> C_JSON["deployment.json"]
@@ -242,13 +245,13 @@ flowchart LR
 
 ## 5. Authentication — Sign-in-with-Stellar + JWT
 
-Krydo does not use passwords or OAuth. Every authenticated session is bootstrapped by a Stellar account signing a canonical challenge message over a server-issued nonce — Sign-in-with-Stellar (SIWS). Freighter signs per SEP-53 with the account's ed25519 key; the server verifies with `verifySep53Message`, then issues a short-lived JWT whose `sub` is the StrKey account address (`G...`, 56 chars, case-sensitive).
+Krydo does not use passwords or OAuth. Every authenticated session is bootstrapped by a Stellar account signing a canonical challenge message over a server-issued nonce — Sign-in-with-Stellar (SIWS). The wallet signs per SEP-53 with the account's ed25519 key; the server verifies with `verifySep53Message` (not raw `Keypair.verify` on UTF-8), then issues a short-lived JWT whose `sub` is the StrKey account address (`G...`, 56 chars, case-sensitive). When contracts are live and the user's role is new or never anchored, the client then confirms a `KrydoAudit.anchor` role event and records it via `POST /api/auth/role-anchor`.
 
 ```mermaid
 sequenceDiagram
     autonumber
     actor U as User (browser)
-    participant W as Wallet (Freighter)
+    participant W as Wallet (Stellar Wallets Kit)
     participant S as Krydo API
 
     U->>S: GET /api/auth/nonce?address=G...
@@ -256,15 +259,22 @@ sequenceDiagram
     S-->>U: { nonce }
     U->>U: build challenge message<br/>(domain, G... addr, nonce, statement)
     U->>W: signMessage(challenge)
-    W-->>U: signature (64-byte ed25519, base64)
+    W-->>U: signature (SEP-53, base64)
     U->>S: POST /api/auth/verify<br/>{ address, message, signature }
     S->>S: message contains address + nonce?
-    S->>S: Keypair.fromPublicKey(addr).verify(msg, sig)?
+    S->>S: verifySep53Message(addr, msg, sig)?
     S->>S: nonce unused and unexpired?
     alt valid
         S->>S: upsert wallet, derive role<br/>sign JWT (HS256)
-        S-->>U: { token, wallet }
+        S-->>U: { token, wallet, needsRoleAnchor }
         Note over U,S: client stores JWT in memory +<br/>localStorage, sends as Bearer
+        opt needsRoleAnchor
+            U->>U: in-app TxConfirm dialog
+            U->>W: sign KrydoAudit.anchor(role, …)
+            W-->>U: txHash
+            U->>S: POST /api/auth/role-anchor<br/>{ txHash }
+            S->>S: waitForClientTx + store hash
+        end
     else invalid
         S-->>U: 401 Unauthorized
     end
@@ -295,21 +305,21 @@ flowchart LR
 
 ## 6. Credential request lifecycle
 
-A holder asking for a credential goes through a finite-state machine. The new flow (Apr 2026) requires the holder to sign an on-chain audit anchor so the issuer never sees an un-consented request, and gives the holder a 1-click escape hatch (Freighter cancel → server DELETE rollback).
+A holder asking for a credential goes through a finite-state machine. The holder must confirm in-app and sign an on-chain audit anchor so the issuer never sees an un-consented request, and gets a 1-click escape hatch (wallet cancel → server DELETE rollback).
 
 ```mermaid
 stateDiagram-v2
     [*] --> DRAFT: open "Request credential" dialog
     DRAFT --> CREATING: click Submit
-    CREATING --> WAITING_SIG: server stored request<br/>status=pending
-    WAITING_SIG --> CANCELLED: Freighter rejected<br/>(user declined)
+    CREATING --> WAITING_SIG: server stored request<br/>status=pending (clientWillAnchor)
+    WAITING_SIG --> CANCELLED: wallet rejected<br/>(user declined)
     CANCELLED --> [*]: DELETE rolls back row
     WAITING_SIG --> ANCHORED: user signed<br/>KrydoAudit.anchor()
     ANCHORED --> RECORDED: POST /anchor with txHash
     RECORDED --> PENDING
     PENDING --> APPROVED: issuer approves
     PENDING --> REJECTED: issuer rejects
-    APPROVED --> ISSUED: issuer mints credential<br/>(two-phase commit)
+    APPROVED --> ISSUED: issuer mints credential<br/>(wallet-signed issue_credential)
     REJECTED --> [*]
     ISSUED --> [*]
 ```
@@ -324,12 +334,12 @@ sequenceDiagram
     participant AUD as KrydoAudit
     participant I as Issuer (later)
 
-    H->>API: POST /api/credential-requests<br/>{ claimType, issuerAddress, message }
+    H->>API: POST /api/credential-requests<br/>{ claimType, issuerAddress, message, clientWillAnchor: true }
     API->>API: Zod validate + create row<br/>status="pending"
     API-->>H: { requestId }
 
-    H->>AUD: anchor(sender, "credreq", id, data)
-    alt user cancels in Freighter
+    H->>AUD: wallet signs anchor(sender, "credreq", id, data)
+    alt user cancels in wallet
         AUD--xH: signing declined
         H->>API: DELETE /api/credential-requests/:id
         API-->>H: 204 No Content
@@ -347,7 +357,7 @@ sequenceDiagram
 
 ## 7. Credential issuance flow
 
-Once a request is approved, the issuer actually mints the credential. Issuance is a **two-phase commit**: the server writes a pending Firestore row, the issuer's wallet signs the on-chain `issue_credential()` call, then the server patches the row with the tx hash. If the on-chain call fails, the Firestore row is kept as `status = "pending_onchain"` so the issuer can retry without re-entering data.
+Once a request is approved (or an issuer issues directly), the credential is minted **wallet-first**. The issuer confirms in-app, signs `KrydoCredentials.issue_credential()` in their wallet, then the API stores the Firestore row with the real `onChainTxHash`. Approving a pending request can use a prepare/finalize handshake (`prepareOnly` → wallet sign → `finalize` + `onChainTxHash`). There is no server-signed issuance path when contracts are configured — missing `onChainTxHash` returns HTTP 400. `PATCH /api/credentials/:id/tx` re-attaches a confirmed hash after a retry.
 
 ```mermaid
 sequenceDiagram
@@ -358,35 +368,26 @@ sequenceDiagram
     participant W as Issuer wallet
     participant KC as KrydoCredentials
 
-    I->>API: POST /api/credentials<br/>{ holder, claimType, claimData, claimSummary, expiresAt }
-    API->>API: requireRole("issuer")<br/>+ Zod validate
+    I->>I: TxConfirm dialog
+    I->>W: sign issue_credential(hash, holder, type, summary)
+    W->>KC: tx
+    KC-->>I: txHash + ledger
+    I->>API: POST /api/credentials<br/>{ holder, claimType, claimData, claimSummary, expiresAt, onChainTxHash }
+    API->>API: requireRole("issuer"|"root")<br/>+ Zod + claim-consistency
     API->>API: compute credentialHash<br/>= sha256(canonical(claimData))
-    API->>FS: upsert credential<br/>status="pending_onchain"
-    API-->>I: { credentialId, credentialHash }
-
-    alt server-signed anchor (root account)
-        API->>KC: issue_credential(hash, holder, type, summary)
-        KC-->>API: tx result, ledger
-        API->>FS: patch status="active"<br/>+ txHash + blockNumber
-    else issuer-signed anchor (Freighter)
-        I->>W: sign issue_credential(...)
-        W->>KC: tx
-        KC-->>I: tx result
-        I->>API: PATCH /api/credentials/:id/tx<br/>{ txHash }
-        API->>API: verify tx<br/>confirm hash matches
-        API->>FS: patch status="active"
-    end
+    API->>FS: create credential + tx row<br/>with wallet txHash
     API-->>I: { credential, txHash, blockNumber }
 ```
 
 ### Claim data validation
 
-`claimData` is validated against a per-type Zod schema before hashing, so an `income_verification` credential is guaranteed to carry `{ amount: number, currency: "INR"|..., ...}` and not arbitrary JSON.
+`claimData` is validated against a per-type Zod schema before hashing, so an `income_verification` credential is guaranteed to carry `{ amount: number, currency: "INR"|..., ...}` and not arbitrary JSON. The UI often sends `{ value }`; `coerceUiClaimData` maps that into the structured shape. Separately, `validateIssuerClaimInputs` in [`shared/claim-consistency.ts`](./shared/claim-consistency.ts) rejects mismatches such as summary “above 750” with numeric value `742`, and enforces credit-score bounds (300–900).
 
 ```mermaid
 flowchart TB
     IN["POST body.claimData"]
-    IN --> SW{"claimType"}
+    IN --> COERCE["coerceUiClaimData"]
+    COERCE --> SW{"claimType"}
     SW -->|credit_score| CS["creditScoreClaimSchema<br/>score ∈ [300, 900]"]
     SW -->|income_verification| INC["incomeClaimSchema<br/>amount ≥ 0, ≤ 10¹²"]
     SW -->|age| AG["ageClaimSchema<br/>years ∈ [0, 150]"]
@@ -394,14 +395,15 @@ flowchart TB
     SW -->|debt_ratio| DR["debtRatioClaimSchema<br/>ratio ∈ [0, 1]"]
     SW -->|asset_proof| AS["assetClaimSchema<br/>valueAmount ≥ 0"]
     SW -->|unknown| PASS["permissive bounded JSON"]
-    CS --> HASH["sha256(canonical)"]
-    INC --> HASH
-    AG --> HASH
-    KYC --> HASH
-    DR --> HASH
-    AS --> HASH
-    PASS --> HASH
-    HASH --> STORE["Firestore + on-chain anchor"]
+    CS --> CONS["claim-consistency<br/>(summary vs value)"]
+    INC --> CONS
+    AG --> CONS
+    KYC --> CONS
+    DR --> CONS
+    AS --> CONS
+    PASS --> CONS
+    CONS --> HASH["sha256(canonical)"]
+    HASH --> STORE["Firestore + on-chain hash"]
 ```
 
 ---
@@ -412,8 +414,9 @@ Once minted, a credential moves through its own lifecycle. Note that revocation 
 
 ```mermaid
 stateDiagram-v2
-    [*] --> PENDING_ONCHAIN: server wrote row
-    PENDING_ONCHAIN --> ACTIVE: on-chain anchor confirmed
+    [*] --> ACTIVE: wallet-signed issue_credential<br/>+ API persist (usual path)
+    [*] --> PENDING_ONCHAIN: prepareOnly / retry staging
+    PENDING_ONCHAIN --> ACTIVE: on-chain tx confirmed<br/>(finalize or PATCH /tx)
     PENDING_ONCHAIN --> ERRORED: anchor failed<br/>(retry available)
     ACTIVE --> REVOKED: issuer or root calls revoke_credential()
     ACTIVE --> ISSUER_REVOKED: root revokes the issuer<br/>(implicit: cred still ACTIVE but<br/>new proofs will fail)
@@ -603,7 +606,7 @@ flowchart TB
 | 32-bit range        |        ~3500 |        ~40 |         ~40 |
 | Selective disclosure (10 fields) | ~1000 |    ~10 |         ~10 |
 
-Numbers measured on a modern laptop (M2 / Zen 3) in Node.js using `@noble/curves`. All primitives are covered by the 154 unit tests in `server/crypto/` and `server/zk-engine.test.ts`.
+Numbers measured on a modern laptop (M2 / Zen 3) in Node.js using `@noble/curves`. Crypto and claim helpers are covered by the **168** unit tests across the repo (including `server/crypto/`, `server/zk-engine.test.ts`, and `shared/claim-consistency.test.ts`).
 
 ---
 
@@ -622,7 +625,7 @@ flowchart LR
     end
     subgraph DB["Firestore (fast, queryable)"]
         D1["mirror of everything above"]
-        D2["credential plaintext<br/>(encrypted)"]
+        D2["credential plaintext<br/>(sensitive — not encrypted at rest)"]
         D3["ZK proof witness data"]
         D4["user sessions (nonces)"]
         D5["request lifecycle state"]
@@ -704,6 +707,7 @@ mindmap
       GET /nonce
       POST /verify
       POST /refresh
+      POST /role-anchor
     issuers
       GET /
       GET /:addr
@@ -718,6 +722,7 @@ mindmap
       POST /
       PATCH /:id/tx
       PATCH /:id/revoke
+      POST /:id/renew
       GET /:id/vc
     credential-requests
       GET /
@@ -798,6 +803,7 @@ flowchart TB
     subgraph L5["L5 — Input"]
         ZB["Zod body/params/query"]
         CS["claim-schemas per type"]
+        CC["claim-consistency<br/>(summary vs value)"]
         BJ["boundedJson (size caps)"]
     end
     subgraph L6["L6 — Business"]
@@ -807,7 +813,7 @@ flowchart TB
     end
     subgraph L7["L7 — Crypto"]
         SP["sigma protocols verify<br/>(Pedersen + Fiat–Shamir)"]
-        EC["ed25519 Keypair.verify<br/>(auth signatures)"]
+        EC["verifySep53Message<br/>(SIWS signatures)"]
         KC["sha256 canonicalization"]
     end
     subgraph L8["L8 — Chain"]
@@ -816,7 +822,7 @@ flowchart TB
     end
     subgraph L9["L9 — Data"]
         FP["Firestore security rules<br/>(no direct client access)"]
-        NS["no plaintext secrets<br/>no keys on server"]
+        NS["no user private keys on server;<br/>DEPLOYER_SECRET only for deploy/root/reads"]
     end
     L1 --> L2 --> L3 --> L4 --> L5 --> L6 --> L7 --> L8 --> L9
 ```
@@ -827,25 +833,25 @@ flowchart TB
 |---------------------------------------------|--------------------------------------------------------------|----------------------------------------------|
 | Network eavesdropper                        | Reads HTTPS                                                  | TLS + HSTS; no secrets in URLs               |
 | Malicious rogue issuer (revoked)            | Tries to issue                                               | `require_auth(issuer)` enforced on-chain      |
-| Compromised server                          | Reads Firestore                                              | No private keys; credential plaintext encrypted; on-chain is ground truth |
+| Compromised server                          | Reads Firestore                                              | No user private keys; **credential plaintext is sensitive in Firestore** (encrypt-at-rest is a roadmap item); on-chain hashes/revocations remain ground truth |
 | Replayed ZK proof                           | Reuses an old proof against a new challenge                  | Proof TTL + optional challenge binding + anchor freshness |
-| Forged Sign-in-with-Stellar signature       | Submits crafted signature                                   | ed25519 `Keypair.verify` over the nonce message; StrKey compared case-sensitively; nonce one-time use |
+| Forged Sign-in-with-Stellar signature       | Submits crafted signature                                   | SEP-53 `verifySep53Message`; StrKey compared case-sensitively; nonce one-time use |
 | Front-running of issuer revocation          | Issues a credential before revocation lands                  | Credential verify re-checks `is_issuer()` at verification time |
 
 ---
 
 ## 17. Deployment topology
 
-Krydo runs as a single Node process + a managed Firestore + three Soroban contracts on Stellar. Frontend is served from the same Node process in prod (static build served by Express), or via Vite dev server locally.
+Krydo runs as a Node/Express API + managed Firestore + three Soroban contracts on Stellar Testnet. Production is typically **Vercel** (serverless `api/` bundle + static client); local/dev can use a single Node process serving the SPA. Render and self-host remain valid alternatives.
 
 ```mermaid
 flowchart TB
     subgraph CLIENT["User device"]
-        BROW["Browser<br/>(React SPA + service worker)"]
-        MM["Freighter wallet"]
+        BROW["Browser<br/>(React SPA)"]
+        MM["Stellar Wallets Kit<br/>(Freighter, xBull, Lobstr, …)"]
     end
-    subgraph RENDER["Render (or self-hosted)"]
-        APP["Node 20 process<br/>npm start"]
+    subgraph HOST["Host (Vercel / Node)"]
+        APP["Express API<br/>(api/app.bundle.cjs or npm start)"]
         APP -- "serves static /client/dist" --> BROW
         APP -- "GET /healthz" --> HC["liveness probe"]
     end
@@ -863,7 +869,7 @@ flowchart TB
     end
 
     BROW -. "HTTPS + JWT" .-> APP
-    MM -. "Freighter-signed tx" .-> RPC
+    MM -. "wallet-signed tx" .-> RPC
     APP -- "Admin SDK" --> FS
     APP -- "Soroban RPC" --> RPC
     RPC --> SEP
@@ -876,14 +882,14 @@ The server refuses to boot if any required env var is missing or malformed. See 
 
 ```mermaid
 flowchart LR
-    BOOT["npm start"] --> LOAD["load .env"]
+    BOOT["npm start / Vercel function"] --> LOAD["load .env"]
     LOAD --> ZOD["Zod validate<br/>(server-config schema)"]
     ZOD -- "invalid" --> FAIL["log readable error<br/>process.exit(1)"]
     ZOD -- "valid" --> INIT["init Firebase admin<br/>init Soroban RPC client<br/>init router"]
-    INIT --> READY["LISTEN :5000"]
+    INIT --> READY["LISTEN :5000 / serverless"]
 ```
 
-Required vars: `JWT_SECRET`, `SESSION_SECRET`, `FIREBASE_PROJECT_ID`, `FIREBASE_SERVICE_ACCOUNT` (or path), `DEPLOYER_SECRET`, `CORS_ORIGINS`. Optional: `STELLAR_NETWORK` (default `testnet`), `SOROBAN_RPC_URL` (defaults to the public RPC in `contracts/deployment.json`). See [`.env.example`](./.env.example) for docs.
+Required vars: `JWT_SECRET`, `SESSION_SECRET`, `FIREBASE_PROJECT_ID`, `FIREBASE_SERVICE_ACCOUNT` (or path), `CORS_ORIGINS`. `DEPLOYER_SECRET` is required for contract deploy and preferred for root identity / RPC signing simulation; chain **reads** can work without it when contract IDs are present. Optional: `STELLAR_NETWORK` (default `testnet`), `SOROBAN_RPC_URL` (defaults to the public RPC in `contracts/deployment.json`). See [`.env.example`](./.env.example) for docs. Live demo: [krydo-stellar.vercel.app](https://krydo-stellar.vercel.app).
 
 ---
 
@@ -896,7 +902,7 @@ flowchart LR
     RID --> HNDL["handler"]
     HNDL --> LOG["pino.info / .error<br/>structured JSON"]
     LOG --> STDOUT["stdout"]
-    STDOUT --> PF["Render logs /<br/>log drain target"]
+    STDOUT --> PF["host logs /<br/>log drain target"]
     HNDL --> METRIC["response latency,<br/>status code"]
     METRIC --> STDOUT
 ```
@@ -930,7 +936,7 @@ Sensitive headers (`authorization`, `cookie`) are redacted automatically.
 - **Project overview & quick start:** [`README.md`](./README.md)
 - **Contributing guide + commit style:** [`CONTRIBUTING.md`](./CONTRIBUTING.md)
 - **Security disclosure policy:** [`SECURITY.md`](./SECURITY.md)
-- **Deployment specifics (Render, indexes):** [`DEPLOY.md`](./DEPLOY.md)
+- **Deployment specifics (Vercel / Render, indexes):** [`DEPLOY.md`](./DEPLOY.md)
 - **Changelog:** [`CHANGELOG.md`](./CHANGELOG.md)
 
 ---
