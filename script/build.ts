@@ -18,6 +18,9 @@ const allowlist = [
   "ws",
   "zod",
   "zod-validation-error",
+  // ESM-only — must be inlined; CJS require() of these fails on Vercel.
+  "@noble/hashes",
+  "@noble/curves",
 ];
 
 async function buildAll() {
