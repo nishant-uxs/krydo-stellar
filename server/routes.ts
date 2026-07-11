@@ -2,7 +2,7 @@ import type { Express } from "express";
 import { type Server } from "http";
 import { initBlockchain } from "./blockchain";
 import { attachAuth } from "./auth/jwt";
-import { registerAuthRoutes } from "./auth/siwe";
+import { registerAuthRoutes } from "./auth/siws";
 import { registerNetworkRoutes } from "./routes/network";
 import { registerIssuerRoutes } from "./routes/issuers";
 import { registerCredentialRoutes } from "./routes/credentials";
@@ -33,7 +33,7 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
   // Kubernetes convention so they never get caught by auth middleware).
   registerHealthRoutes(app);
 
-  // Auth (SIWE nonce / verify / me).
+  // Auth (SIWS nonce / verify / me).
   registerAuthRoutes(app);
 
   // Domain routers.

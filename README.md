@@ -22,9 +22,11 @@
 
 ## TL;DR
 
-Krydo is a verifiable-credential system on the Stellar network, running Soroban smart contracts. Issuers sign claims into `KrydoCredentials`; holders keep the plaintext off-chain and prove predicates over it with sigma-protocol zero-knowledge proofs (Pedersen commitments on secp256k1, Fiat–Shamir). A verifier learns whether the predicate holds — `score >= 700`, `income >= 1000000`, `issuer is whitelisted` — not the underlying value.
+Krydo is a verifiable-credential system on the Stellar network, running Soroban smart contracts. Issuers sign claims into `KrydoCredentials`; holders keep the plaintext off-chain and prove predicates over it with sigma-protocol zero-knowledge proofs (Pedersen commitments + Fiat–Shamir). A verifier learns whether the predicate holds — `score >= 700`, `income >= 1000000`, `issuer is whitelisted` — not the underlying value.
 
-Three Soroban contracts, one purpose each: `KrydoAuthority` owns the issuer whitelist, `KrydoCredentials` stores credential hashes and revocations, `KrydoAudit` anchors off-chain events. Auth is Sign-in-with-Stellar (a Freighter-signed ed25519 challenge) with a short-lived JWT. The server never holds user secrets; every state-changing action is signed by the acting wallet.
+Three Soroban contracts, one purpose each: `KrydoAuthority` owns the issuer whitelist, `KrydoCredentials` stores credential hashes and revocations, `KrydoAudit` anchors off-chain events. Auth is **Sign-in-with-Stellar (SIWS)** — a wallet-signed SEP-53 challenge over a server nonce, verified server-side, then a short-lived JWT. The server never holds user secrets; every state-changing action is signed by the acting wallet.
+
+**Wallets:** multi-wallet connect via [Stellar Wallets Kit](https://stellarwalletskit.dev) (Freighter, xBull, Lobstr, Hana, Rabet, HOT, and more) — same idea as a multi-wallet modal on other chains, but Stellar-native.
 
 ---
 
@@ -32,7 +34,7 @@ Three Soroban contracts, one purpose each: `KrydoAuthority` owns the issuer whit
 
 Current verification flows over-collect by default. A lender asking "do you earn at least ₹10 L?" gets the user's exact salary, employer, six months of bank statements, and often their PAN. That data leaks, gets re-sold, and can't be revoked once it's out.
 
-Zero-knowledge proofs solve the shape of this problem — prove the predicate, not the value — but SNARK-based stacks force circuits, trusted setup, and non-trivial cost. Krydo takes the simpler path: sigma protocols over Pedersen commitments on secp256k1. No setup ceremony, no circuit compiler, proofs generated in the browser in milliseconds, verification in the same API call that fetches the credential — and Stellar's sub-cent fees make anchoring effectively free.
+Zero-knowledge proofs solve the shape of this problem — prove the predicate, not the value — but SNARK-based stacks force circuits, trusted setup, and non-trivial cost. Krydo takes the simpler path: sigma protocols over Pedersen commitments on a prime-order elliptic curve. No setup ceremony, no circuit compiler, proofs generated in the browser in milliseconds, verification in the same API call that fetches the credential — and Stellar's sub-cent fees make anchoring effectively free.
 
 ---
 
@@ -139,7 +141,7 @@ flowchart LR
 
 ## Zero-knowledge proof system
 
-Not SNARKs. Not hash-masking-pretending-to-be-ZK. **Real sigma protocols over Pedersen commitments on secp256k1**, with Fiat–Shamir for non-interactivity.
+Not SNARKs. Not hash-masking-pretending-to-be-ZK. **Real sigma protocols over Pedersen commitments**, with Fiat–Shamir for non-interactivity.
 
 | Proof type              | Example use case                                   |
 |-------------------------|----------------------------------------------------|
@@ -150,7 +152,7 @@ Not SNARKs. Not hash-masking-pretending-to-be-ZK. **Real sigma protocols over Pe
 | `non_zero`              | "I have a PAN number"                              |
 | `selective_disclosure`  | "reveal name + employer; hide salary + address"    |
 
-**Security:** soundness + honest-verifier zero-knowledge under the discrete-log assumption on secp256k1. Soundness error ≈ 2⁻²⁵⁶ per protocol step. All primitives live in [`server/crypto/`](./server/crypto/) and are covered by **51 unit tests** (of 154 total).
+**Security:** soundness + honest-verifier zero-knowledge under the discrete-log assumption on the commitment curve. Soundness error ≈ 2⁻²⁵⁶ per protocol step. All primitives live in [`server/crypto/`](./server/crypto/) and are covered by **51 unit tests** (of 154 total).
 
 See [`DOCUMENTATION.md §9–12`](./DOCUMENTATION.md#9-zero-knowledge-proof-system) for protocol details, bit-decomposition, and performance numbers.
 
@@ -162,27 +164,30 @@ See [`DOCUMENTATION.md §9–12`](./DOCUMENTATION.md#9-zero-knowledge-proof-syst
 |---------------------------|------------------------------------------------------------------|
 | Smart contracts           | Soroban (Rust) on Stellar (`KrydoAuthority`, `KrydoCredentials`, `KrydoAudit`) |
 | On-chain library          | `@stellar/stellar-sdk` (Soroban RPC)                            |
-| Cryptography              | `@noble/curves` (secp256k1), `@noble/hashes` (SHA-256)           |
+| Cryptography              | `@noble/curves` + `@noble/hashes` (SHA-256) — Pedersen + sigma ZK |
 | Backend                   | Node 20, Express, TypeScript, Zod, pino, Helmet, jsonwebtoken    |
 | Database                  | Firebase Firestore (Admin SDK)                                   |
 | Frontend                  | React 18, Vite, TanStack Query, shadcn/ui, Tailwind, wouter      |
-| Wallet                    | Freighter (`@stellar/freighter-api`)                            |
-| Auth                      | Sign-in-with-Stellar (ed25519 challenge) + JWT (`jsonwebtoken`) |
-| Testing                   | Vitest + `@vitest/coverage-v8` (154 tests)                       |
+| Wallet                    | [Stellar Wallets Kit](https://stellarwalletskit.dev) — Freighter, xBull, Lobstr, Hana, … |
+| Auth                      | SIWS (SEP-53 `signMessage`) + JWT (`jsonwebtoken`)                  |
+| Testing                   | Vitest + `@vitest/coverage-v8` (160+ tests)                          |
 | CI                        | GitHub Actions (Node 20, typecheck + test)                       |
+| Hosting                   | Vercel (`vercel.json` + serverless `api/`) / Render Blueprint        |
 
 ---
 
 ## Deployment (Stellar Testnet)
 
-Contract IDs are written to [`contracts/deployment.json`](./contracts/deployment.json) after you run `npm run deploy:contracts`. Once deployed, each `C...` contract ID is browsable on [Stellar Expert](https://stellar.expert/explorer/testnet):
+Live Testnet deployment (see [`contracts/deployment.json`](./contracts/deployment.json)):
 
-| Contract              | Contract ID (`C...`)                        |
-|-----------------------|---------------------------------------------|
-| `KrydoAuthority`      | see `contracts/deployment.json`             |
-| `KrydoCredentials`    | see `contracts/deployment.json`             |
-| `KrydoAudit`          | see `contracts/deployment.json`             |
-| Root authority (`G...`) | deployer account, funded via friendbot    |
+| Contract / role         | ID |
+|-------------------------|----|
+| `KrydoAuthority`        | [`CDBYAPYW34OCTNMTT3H75XLC2JRA7HD4ULA5YVJ75SISM67GPCD6FNK2`](https://stellar.expert/explorer/testnet/contract/CDBYAPYW34OCTNMTT3H75XLC2JRA7HD4ULA5YVJ75SISM67GPCD6FNK2) |
+| `KrydoCredentials`      | [`CD7PFDNVL2V4SO4WQWP225CJRYV24GIGM3ZALS2WHIEM6UINQK7KJCOV`](https://stellar.expert/explorer/testnet/contract/CD7PFDNVL2V4SO4WQWP225CJRYV24GIGM3ZALS2WHIEM6UINQK7KJCOV) |
+| `KrydoAudit`            | [`CALAZRCMK2POSKYEXA7LB3SPIBU5555SD5LX53LHC2YYCSZMYEQVXJSX`](https://stellar.expert/explorer/testnet/contract/CALAZRCMK2POSKYEXA7LB3SPIBU5555SD5LX53LHC2YYCSZMYEQVXJSX) |
+| Root authority (`G...`) | [`GC5VBHY5DWV7NTL4PCQL3XGOE4FY2DJHM2JYLRC6YS2IHYTPDZ4DOFIU`](https://stellar.expert/explorer/testnet/account/GC5VBHY5DWV7NTL4PCQL3XGOE4FY2DJHM2JYLRC6YS2IHYTPDZ4DOFIU) |
+
+Redeploy locally with `npm run compile:contracts` then `npm run deploy:contracts` (requires `DEPLOYER_SECRET`).
 
 ---
 
@@ -194,7 +199,7 @@ Contract IDs are written to [`contracts/deployment.json`](./contracts/deployment
 - Rust + the [Stellar CLI](https://developers.stellar.org/docs/tools/cli) (only needed to build/deploy contracts)
 - A Firebase project with Firestore enabled + an Admin SDK service-account JSON
 - A Stellar testnet account funded via [friendbot](https://friendbot.stellar.org) (for issuer / credential operations)
-- The [Freighter](https://freighter.app) browser wallet extension
+- A Stellar wallet: [Freighter](https://freighter.app), xBull, Lobstr, or any wallet listed in the connect modal
 
 ### Install & run
 
@@ -203,13 +208,15 @@ git clone https://github.com/nishant-uxs/krydo-stellar.git
 cd krydo-stellar
 npm install
 cp .env.example .env        # fill in values — server validates at boot
-npm run dev                 # http://localhost:5000 with HMR
+npm run dev                 # http://localhost:5000
 ```
+
+**Roles (root / issuer / user):** the account whose secret is `DEPLOYER_SECRET` becomes **root** after `npm run deploy:contracts`. Root whitelists issuer `G...` addresses on-chain; any other connected wallet is a **user**. Connect via the multi-wallet modal, then complete SIWS (sign the challenge).
 
 Common scripts:
 
 ```bash
-npm test            # 154 unit tests (~16s)
+npm test            # unit tests
 npm run check       # strict typecheck
 npm run build       # production build
 npm start           # run built server
@@ -234,9 +241,10 @@ npm run compile:contracts    # stellar contract build → contracts/target/…/*
 npm run deploy:contracts     # stellar contract deploy → writes contracts/deployment.json
 ```
 
-### Deploy to Render
+### Deploy to Vercel / Render
 
-The repo ships with a [`render.yaml`](./render.yaml) Blueprint — push to GitHub, click **New +** → **Blueprint** in Render, fill in the prompted secrets (`FIREBASE_SERVICE_ACCOUNT`, `DEPLOYER_SECRET`, `SOROBAN_RPC_URL`, `CORS_ORIGINS`) and apply. Full walkthrough in [`DEPLOY.md`](./DEPLOY.md).
+- **Vercel:** `vercel.json` + `api/` serverless entry; set env vars from `.env.example` (`FIREBASE_SERVICE_ACCOUNT`, `DEPLOYER_SECRET`, `CORS_ORIGINS`, secrets). Install uses `NPM_CONFIG_PRODUCTION=false` so `tsx` is available at build time.
+- **Render:** [`render.yaml`](./render.yaml) Blueprint — see [`DEPLOY.md`](./DEPLOY.md).
 
 ### Export as W3C Verifiable Credential
 
@@ -253,15 +261,18 @@ Returns `application/vc+ld+json` with a `did:pkh:stellar` subject and a Krydo on
 ```
 krydo-stellar/
 ├── client/                    # React app (Vite)
+│   └── src/lib/               # wallet-kit (multi-wallet), SIWS, contracts
 ├── server/                    # Express API
-│   ├── auth/                  # Sign-in-with-Stellar + JWT
+│   ├── auth/                  # SIWS (siws.ts) + JWT + SEP-53 verify
 │   ├── crypto/                # EC math, Pedersen, sigma protocols
 │   ├── routes/                # issuers, credentials, zk, stats, health
 │   ├── blockchain.ts          # Soroban RPC + contract wrappers
 │   ├── storage.ts             # Firestore abstraction
 │   └── zk-engine.ts           # high-level proof types
-├── shared/                    # types + contract metadata used by both sides
+├── shared/                    # types, SEP-53, contract metadata
 ├── contracts/                 # Soroban Rust workspace + deployment.json
+├── api/                       # Vercel serverless entry
+├── vercel.json                # Vercel build / routes
 ├── render.yaml                # Render Blueprint
 └── DOCUMENTATION.md           # ← full architecture spec
 ```
@@ -282,10 +293,12 @@ See [`DOCUMENTATION.md §16`](./DOCUMENTATION.md#16-security-layers) for the ful
 
 ### Shipped
 
-- [x] Real ZK primitives on secp256k1 (Pedersen + sigma protocols)
-- [x] Sign-in-with-Stellar authentication + JWT
+- [x] Real ZK primitives (Pedersen + sigma protocols)
+- [x] Sign-in-with-Stellar (SIWS) + SEP-53 message verify + JWT
+- [x] Multi-wallet connect (Stellar Wallets Kit — Freighter, xBull, Lobstr, …)
 - [x] Full SSI mode — every on-chain write goes through the user's wallet
 - [x] `KrydoAudit` contract for wallet-signed off-chain anchors
+- [x] Soroban contracts live on Stellar Testnet (`contracts/deployment.json`)
 - [x] Helmet + CORS + per-IP rate limiting + Zod everywhere
 - [x] Structured logging (pino) + request IDs
 - [x] Per-claim-type structured Zod schemas
@@ -294,10 +307,9 @@ See [`DOCUMENTATION.md §16`](./DOCUMENTATION.md#16-security-layers) for the ful
 - [x] Health + readiness probes (`/healthz`, `/readyz`)
 - [x] Issuer analytics (`/api/stats/issuer/:address`)
 - [x] Search + filter on credential and issuer lists
-- [x] Freighter wallet integration (`@stellar/freighter-api`)
 - [x] W3C Verifiable Credentials v2 export
-- [x] One-click Render deploy (`render.yaml`)
-- [x] 154 unit tests + GitHub Actions CI + coverage artifact
+- [x] Vercel + Render deploy paths
+- [x] 160+ unit tests + GitHub Actions CI + coverage artifact
 
 ### Next up
 

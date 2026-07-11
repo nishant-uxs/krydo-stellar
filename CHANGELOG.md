@@ -8,17 +8,17 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ## [Unreleased]
 
-### Changed — migrated from Ethereum/EVM to Stellar (Soroban)
+### Changed — Stellar / Soroban stack hardening
 
-- **Smart contracts** ported from Solidity to Soroban (Rust). Contract source now lives in a Cargo workspace under `contracts/` (crates: `authority/`, `credentials/`, `audit/`), built with `stellar contract build` into `contracts/target/wasm32v1-none/release/*.wasm` (`krydo_authority.wasm`, `krydo_credentials.wasm`, `krydo_audit.wasm`). Method names are now snake_case: `issue_credential`, `revoke_credential`, `get_credential`, `verify_credential`, `add_issuer`, `revoke_issuer`, `is_issuer`, `get_issuer_info`, `get_issuers`, `anchor`.
-- **On-chain library** swapped from `ethers` to `@stellar/stellar-sdk` (Soroban RPC). Deploy uses `stellar contract deploy`; contract IDs (`C...`) are written to `contracts/deployment.json` alongside `network`, `networkPassphrase`, `rpcUrl`, `horizonUrl`, `explorerUrl`, and `deployer`.
-- **Wallet** swapped from wagmi/RainbowKit/WalletConnect/MetaMask to [Freighter](https://freighter.app) (`@stellar/freighter-api`). Removed `client/src/lib/wagmi.ts` and `client/src/lib/eip1193-bridge.ts`; added `client/src/lib/stellar.ts`.
-- **Auth** migrated from EIP-4361 Sign-In-With-Ethereum to Sign-in-with-Stellar — a Freighter-signed ed25519 challenge over a server-issued nonce, verified with `Keypair.verify`. JWT flow unchanged; `sub` is now a StrKey account (`G...`, 56 chars, case-sensitive).
-- **Identifiers**: accounts are StrKey `G...` (case-sensitive, never lowercased); contract IDs are `C...`; transaction hashes are bare 64-hex (no `0x` prefix); credential/commitment hashes are bare hex anchored on Soroban as `BytesN<32>`.
+- **Smart contracts** in Soroban (Rust). Contract source lives in a Cargo workspace under `contracts/` (crates: `authority/`, `credentials/`, `audit/`), built with `stellar contract build` into `contracts/target/wasm32v1-none/release/*.wasm` (`krydo_authority.wasm`, `krydo_credentials.wasm`, `krydo_audit.wasm`). Method names are snake_case: `issue_credential`, `revoke_credential`, `get_credential`, `verify_credential`, `add_issuer`, `revoke_issuer`, `is_issuer`, `get_issuer_info`, `get_issuers`, `anchor`.
+- **On-chain library** `@stellar/stellar-sdk` (Soroban RPC). Deploy uses `stellar contract deploy`; contract IDs (`C...`) are written to `contracts/deployment.json` alongside `network`, `networkPassphrase`, `rpcUrl`, `horizonUrl`, `explorerUrl`, and `deployer`.
+- **Wallet** [Freighter](https://freighter.app) (`@stellar/freighter-api`) via `client/src/lib/stellar.ts`.
+- **Auth** Sign-in-with-Stellar (SIWS) — Freighter-signed SEP-53 challenge over a server-issued nonce (`server/auth/siws.ts`), verified with `verifySep53Message`. JWT `sub` is a StrKey account (`G...`, 56 chars, case-sensitive).
+- **Identifiers**: accounts are StrKey `G...` (case-sensitive, never lowercased); contract IDs are `C...`; transaction hashes are bare 64-hex; credential/commitment hashes are bare hex anchored on Soroban as `BytesN<32>`.
 - **Explorer** links point at [Stellar Expert](https://stellar.expert/explorer/testnet) (`/tx/<hash>`, `/account/<G...>`, `/contract/<C...>`).
-- **Env vars**: `ALCHEMY_API_KEY` → `SOROBAN_RPC_URL` (optional; defaults to the public RPC in `contracts/deployment.json`); `DEPLOYER_PRIVATE_KEY` → `DEPLOYER_SECRET` (StrKey secret, `S...`); added `STELLAR_NETWORK` (`testnet`|`mainnet`|`futurenet`, default `testnet`); removed `VITE_WALLETCONNECT_PROJECT_ID`.
-- **W3C VC export** now emits `did:pkh:stellar:testnet:G...` issuer/subject IDs and a CAIP-2 chain of `stellar:testnet`.
-- The ZK crypto core is unchanged — still sigma protocols over Pedersen commitments on `secp256k1` (internal to the proofs, independent of Stellar's ed25519 account keys).
+- **Env vars**: `SOROBAN_RPC_URL` (optional; defaults to the public RPC in `contracts/deployment.json`); `DEPLOYER_SECRET` (StrKey secret, `S...`); `STELLAR_NETWORK` (`testnet`|`mainnet`|`futurenet`, default `testnet`).
+- **W3C VC export** emits `did:pkh:stellar:testnet:G...` issuer/subject IDs and a CAIP-2 chain of `stellar:testnet`.
+- ZK crypto core: sigma protocols over Pedersen commitments (off-chain proofs; independent of Stellar ed25519 account keys).
 
 ---
 
@@ -50,7 +50,7 @@ Interop + UX upgrade. Three structural items that unblock production rollout.
 
 ### Changed
 
-- Landing page + WalletButton copy: "Connect MetaMask" → "Connect Wallet". Same button, more honest label.
+- Landing page + WalletButton copy: "Connect Wallet" (Freighter).
 - Project layout tree in README updated to call out `lib/stellar.ts`, `shared/vc.ts`, and `render.yaml`.
 - Tests bumped from 132 to **154** (+22 VC mapper cases).
 
@@ -96,8 +96,8 @@ First pitch-ready release. Full hardening of the security / crypto / infra found
 
 ### Added — security & cryptography
 
-- **Real zero-knowledge proofs.** Replaced the previous hash-commitment placeholder (`SHA256(value ∥ salt)`) with sigma protocols on secp256k1: Pedersen commitments, Schnorr proof-of-knowledge, knowledge-of-opening, bit-decomposition range proofs, equality proofs, k-way OR membership proofs. All primitives live in `server/crypto/{ec,pedersen,sigma}.ts`. Fiat–Shamir for non-interactivity.
-- **Sign-in-with-Stellar authentication.** A Freighter-signed ed25519 challenge over a server-issued nonce (`server/auth/siwe.ts`) issues short-lived JWTs, verified with `Keypair.verify`. Server no longer trusts `req.body.address` — every mutation is cryptographically tied to a wallet signature.
+- **Real zero-knowledge proofs.** Replaced the previous hash-commitment placeholder (`SHA256(value ∥ salt)`) with sigma protocols over Pedersen commitments: Schnorr proof-of-knowledge, knowledge-of-opening, bit-decomposition range proofs, equality proofs, k-way OR membership proofs. All primitives live in `server/crypto/{ec,pedersen,sigma}.ts`. Fiat–Shamir for non-interactivity.
+- **Sign-in-with-Stellar authentication.** A Freighter-signed ed25519 challenge over a server-issued nonce (`server/auth/siws.ts`) issues short-lived JWTs (SEP-53 verify). Server no longer trusts `req.body.address` — every mutation is cryptographically tied to a wallet signature.
 - **Role-based access control.** `requireAuth`, `requireRole(...)`, `requireSelf({ param | bodyKey })` middlewares gate every mutation.
 - **Input hardening.** Zod schemas on every body / params / query (`server/validation/schemas.ts`).
 - **Transport hardening.** Helmet CSP, CORS allowlist via `CORS_ORIGINS`, per-IP rate limits (stricter for sensitive ops).

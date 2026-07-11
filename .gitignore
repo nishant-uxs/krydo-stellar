@@ -12,6 +12,7 @@ coverage
 .env
 .env.*
 !.env.example
+vercel-env.local.txt
 
 # Firebase service-account credentials
 krydo-*firebase-adminsdk*.json

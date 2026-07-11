@@ -10,13 +10,13 @@ import {
 import { valueOnly, addCommitments, subCommitments, scaleCommitment } from "./pedersen.js";
 
 /**
- * Sigma protocols over Pedersen commitments on secp256k1.
+ * Sigma protocols over Pedersen commitments.
  *
  * All proofs are non-interactive via Fiat-Shamir:
  *   challenge c = H("krydo-zkp-v2" || domain || public-inputs || prover-commits)
  *
  * Security: EUF-CMA / honest-verifier zero-knowledge under the discrete-log
- * assumption on secp256k1. Soundness error = 1/N ≈ 2^-256 per protocol step.
+ * assumption on the commitment curve. Soundness error = 1/N ≈ 2^-256 per protocol step.
  */
 
 const DOMAIN = "krydo-zkp-v2";

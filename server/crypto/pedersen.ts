@@ -1,7 +1,7 @@
 import { G, H, Point, randomScalar, modN } from "./ec.js";
 
 /**
- * Pedersen commitments on secp256k1:
+ * Pedersen commitments on a prime-order elliptic curve:
  *   C = v·G + r·H
  *
  * Perfectly hiding (given H with unknown log_G) and computationally binding

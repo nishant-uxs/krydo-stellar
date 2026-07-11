@@ -31,8 +31,8 @@ threat model. -->
 - [ ] No new secrets, keys, or service-account JSONs committed
 - [ ] Commit messages follow [Conventional Commits](https://www.conventionalcommits.org/)
 - [ ] If touching `server/crypto/*` or `server/zk-engine.ts`, I've included a short threat-model note above
-- [ ] If touching `contracts/*.sol`, I've bumped the protocol version tag and noted the migration path
+- [ ] If touching `contracts/**/*.rs`, I've noted contract IDs / redeploy impact
 
 ## Screenshots / output
 
-<!-- Optional: UI screenshots, test-run output, gas-diff screenshots. -->
+<!-- Optional: UI screenshots, test-run output, explorer links. -->

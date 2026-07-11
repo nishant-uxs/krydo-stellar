@@ -17,6 +17,11 @@ export default defineConfig({
     },
   },
   optimizeDeps: {
+    include: [
+      "@creit.tech/stellar-wallets-kit",
+      "@creit.tech/stellar-wallets-kit/modules/utils",
+      "buffer",
+    ],
     esbuildOptions: {
       define: { global: "globalThis" },
     },

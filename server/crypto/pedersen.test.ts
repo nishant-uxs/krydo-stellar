@@ -12,7 +12,7 @@ import {
  * break that here). Hiding + homomorphism are structurally testable though.
  */
 
-describe("pedersen.ts — Pedersen commitments on secp256k1", () => {
+describe("pedersen.ts — Pedersen commitments", () => {
   describe("commit / verifyOpen", () => {
     it("opens to the same (value, blinding)", () => {
       const v = 42n;

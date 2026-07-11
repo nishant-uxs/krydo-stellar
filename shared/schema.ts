@@ -5,7 +5,7 @@ import { z } from "zod";
 /**
  * Stellar account address in StrKey form: `G` + 55 base32 chars (ed25519
  * public key). Case-sensitive — StrKey is canonical upper-case base32, so we
- * never lower-case it (unlike EVM addresses).
+ * never lower-case it (StrKey is case-sensitive).
  */
 export const stellarAddressSchema = z
   .string()

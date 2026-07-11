@@ -41,15 +41,15 @@ function mockRes() {
 
 describe("auth/jwt — token helpers", () => {
   it("signs a token that verifyAuthToken can decode", () => {
-    const token = signAuthToken({ sub: "0xabc", role: "user" });
+    const token = signAuthToken({ sub: "GTESTADDR0000000000000000000000000000000000000000000", role: "user" });
     const decoded = verifyAuthToken(token);
     expect(decoded).not.toBeNull();
-    expect(decoded!.sub).toBe("0xabc");
+    expect(decoded!.sub).toBe("GTESTADDR0000000000000000000000000000000000000000000");
     expect(decoded!.role).toBe("user");
   });
 
   it("signed tokens include iat / exp claims", () => {
-    const token = signAuthToken({ sub: "0xabc", role: "user" });
+    const token = signAuthToken({ sub: "GTESTADDR0000000000000000000000000000000000000000000", role: "user" });
     const decoded = verifyAuthToken(token);
     expect(decoded!.iat).toBeTypeOf("number");
     expect(decoded!.exp).toBeTypeOf("number");
@@ -76,11 +76,11 @@ describe("auth/jwt — attachAuth middleware", () => {
   });
 
   it("populates req.auth when a valid Bearer token is present", () => {
-    const token = signAuthToken({ sub: "0xabc", role: "issuer" });
+    const token = signAuthToken({ sub: "GTESTADDR0000000000000000000000000000000000000000000", role: "issuer" });
     const req = mockReq({ headers: { authorization: `Bearer ${token}` } });
     attachAuth(req, mockRes(), next);
     expect(req.auth).toBeDefined();
-    expect(req.auth!.sub).toBe("0xabc");
+    expect(req.auth!.sub).toBe("GTESTADDR0000000000000000000000000000000000000000000");
     expect(next).toHaveBeenCalledOnce();
   });
 
@@ -117,7 +117,7 @@ describe("auth/jwt — requireAuth guard", () => {
 
   it("calls next() when req.auth is present", () => {
     const req = mockReq();
-    req.auth = { sub: "0xabc", role: "user" };
+    req.auth = { sub: "GTESTADDR0000000000000000000000000000000000000000000", role: "user" };
     const res = mockRes();
     const next = vi.fn();
     requireAuth(req, res, next);
@@ -130,7 +130,7 @@ describe("auth/jwt — requireRole factory", () => {
   it("403s on role mismatch", () => {
     const guard = requireRole("root");
     const req = mockReq();
-    req.auth = { sub: "0xabc", role: "user" };
+    req.auth = { sub: "GTESTADDR0000000000000000000000000000000000000000000", role: "user" };
     const res = mockRes();
     const next = vi.fn();
     guard(req, res, next);
@@ -141,7 +141,7 @@ describe("auth/jwt — requireRole factory", () => {
   it("accepts any role in the whitelist", () => {
     const guard = requireRole("issuer", "root");
     const req = mockReq();
-    req.auth = { sub: "0xabc", role: "issuer" };
+    req.auth = { sub: "GTESTADDR0000000000000000000000000000000000000000000", role: "issuer" };
     const res = mockRes();
     const next = vi.fn();
     guard(req, res, next);
@@ -159,20 +159,42 @@ describe("auth/jwt — requireRole factory", () => {
 });
 
 describe("auth/jwt — requireSelf guard", () => {
-  it("accepts when param matches authenticated wallet (case-insensitive)", () => {
+  it("accepts when param matches authenticated wallet exactly (StrKey case-sensitive)", () => {
     const guard = requireSelf({ param: "addr" });
-    const req = mockReq({ params: { addr: "0xABCdef" } });
-    req.auth = { sub: "0xabcdef", role: "user" };
+    const addr = "GBXFXNDLV4LSWA4VB7YIL5GBD7BVNR22SGBTDKMO2SBZZHDXSKZYCP7L";
+    const req = mockReq({ params: { addr } });
+    req.auth = { sub: addr, role: "user" };
     const res = mockRes();
     const next = vi.fn();
     guard(req, res, next);
     expect(next).toHaveBeenCalledOnce();
   });
 
+  it("403s when StrKey casing differs (Stellar addresses are case-sensitive)", () => {
+    const guard = requireSelf({ param: "addr" });
+    const req = mockReq({
+      params: { addr: "gbxfxndlv4lswa4vb7yil5gbd7bvnr22sgbtdkmo2sbzzhdxskzycp7l" },
+    });
+    req.auth = {
+      sub: "GBXFXNDLV4LSWA4VB7YIL5GBD7BVNR22SGBTDKMO2SBZZHDXSKZYCP7L",
+      role: "user",
+    };
+    const res = mockRes();
+    const next = vi.fn();
+    guard(req, res, next);
+    expect(res.status).toHaveBeenCalledWith(403);
+    expect(next).not.toHaveBeenCalled();
+  });
+
   it("403s when param is a different address", () => {
     const guard = requireSelf({ param: "addr" });
-    const req = mockReq({ params: { addr: "0xDEADBEEF" } });
-    req.auth = { sub: "0xabc", role: "user" };
+    const req = mockReq({
+      params: { addr: "GAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAWHF" },
+    });
+    req.auth = {
+      sub: "GBXFXNDLV4LSWA4VB7YIL5GBD7BVNR22SGBTDKMO2SBZZHDXSKZYCP7L",
+      role: "user",
+    };
     const res = mockRes();
     const next = vi.fn();
     guard(req, res, next);
@@ -183,7 +205,10 @@ describe("auth/jwt — requireSelf guard", () => {
   it("400s when the field is missing", () => {
     const guard = requireSelf({ bodyKey: "address" });
     const req = mockReq({ body: {} });
-    req.auth = { sub: "0xabc", role: "user" };
+    req.auth = {
+      sub: "GBXFXNDLV4LSWA4VB7YIL5GBD7BVNR22SGBTDKMO2SBZZHDXSKZYCP7L",
+      role: "user",
+    };
     const res = mockRes();
     const next = vi.fn();
     guard(req, res, next);

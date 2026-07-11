@@ -43,7 +43,7 @@ export function registerZkRoutes(app: Express) {
       const credential = await storage.getCredentialById(data.credentialId);
       if (!credential) return res.status(404).json({ message: "Credential not found" });
 
-      if (credential.holderAddress.toLowerCase() !== data.proverAddress.toLowerCase()) {
+      if (credential.holderAddress !== data.proverAddress) {
         return res
           .status(403)
           .json({ message: "Only the credential holder can generate ZK proofs" });
@@ -209,8 +209,8 @@ export function registerZkRoutes(app: Express) {
       const proof = await storage.getZkProof(id);
       if (!proof) return res.status(404).json({ message: "ZK proof not found" });
 
-      const caller = req.auth!.sub.toLowerCase();
-      const isProver = proof.proverAddress.toLowerCase() === caller;
+      const caller = req.auth!.sub;
+      const isProver = proof.proverAddress === caller;
       const isRoot = req.auth!.role === "root";
       if (!isProver && !isRoot) {
         return res
@@ -330,7 +330,7 @@ export function registerZkRoutes(app: Express) {
           const r = await verifyCredentialOnChain(credential.credentialHash);
           onChainVerified =
             r.valid &&
-            r.holder.toLowerCase() === credential.holderAddress.toLowerCase() &&
+            r.holder === credential.holderAddress &&
             r.issuerActive;
         } catch (err: any) {
           log.error({ err: err.message }, "on-chain credential verification during ZK verify failed");

@@ -39,7 +39,7 @@ body:
       options:
         - Smart contracts
         - ZK proof system
-        - Authentication (SIWE / JWT)
+        - Authentication (SIWS / JWT)
         - API / routes
         - Client UI
         - Tests / CI

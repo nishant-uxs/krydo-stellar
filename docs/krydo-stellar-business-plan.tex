@@ -257,7 +257,7 @@ This data is stored indefinitely by multiple parties, re-sold through data broke
   \item \textbf{Outcome:} Lender confirms income $\geq$ threshold. Actual salary remains hidden.
 \end{enumerate}
 
-\subsection{Current Technical Stack (Ethereum MVP)}
+\subsection{Current Technical Stack (\stellar{})}
 
 \begin{table}[H]
   \centering
@@ -266,13 +266,13 @@ This data is stored indefinitely by multiple parties, re-sold through data broke
     \toprule
     Layer & Technology \\
     \midrule
-    Smart contracts & Solidity 0.8.x (\texttt{KrydoAuthority}, \texttt{KrydoCredentials}, \texttt{KrydoAudit}) \\
-    Cryptography & Sigma protocols, Pedersen commitments on secp256k1, Fiat--Shamir \\
+    Smart contracts & \soroban{} Rust (\texttt{KrydoAuthority}, \texttt{KrydoCredentials}, \texttt{KrydoAudit}) \\
+    Cryptography & Sigma protocols, Pedersen commitments, Fiat--Shamir (off-chain ZK) \\
     Backend & Node.js 20, Express, TypeScript, Zod, Firebase Firestore \\
     Frontend & React 18, Vite, shadcn/ui, TanStack Query \\
-    Wallet & wagmi v2 + RainbowKit (EIP-1193) \\
-    Auth & EIP-4361 SIWE + JWT \\
-    Testing & 154 unit tests (Vitest) \\
+    Wallet & Freighter (\texttt{@stellar/freighter-api}) \\
+    Auth & Sign-in-with-Stellar (SEP-53) + JWT \\
+    Testing & 160+ unit tests (Vitest) \\
     \bottomrule
   \end{tabularx}
 \end{table}
@@ -286,7 +286,7 @@ This data is stored indefinitely by multiple parties, re-sold through data broke
 
 \begin{keybox}[\stellar{} Advantages for \krydo{}]
   \begin{enumerate}
-    \item \textbf{Cost efficiency:} Sub-cent transaction fees enable high-volume verification anchoring without prohibitive gas costs. Ethereum mainnet gas makes per-credential anchoring economically unviable at scale.
+    \item \textbf{Cost efficiency:} Sub-cent transaction fees enable high-volume verification anchoring without prohibitive per-credential costs.
     \item \textbf{\soroban{} smart contracts:} Rust-based WASM contracts for issuer registry, credential hash anchoring, and audit events---with formal verification tooling and predictable execution costs.
     \item \textbf{Cross-border credentials:} \stellar{}'s remittance and payment rails align with verifying income/credit for diaspora lending, global DeFi, and international student financing.
     \item \textbf{Fast finality:} 3--5 second confirmation supports real-time verification UX expected by fintech customers.
@@ -295,22 +295,22 @@ This data is stored indefinitely by multiple parties, re-sold through data broke
   \end{enumerate}
 \end{keybox}
 
-\subsection{\stellar{} vs.\ Ethereum for Production}
+\subsection{Why \stellar{} for Production}
 
 \begin{table}[H]
   \centering
-  \caption{Deployment platform comparison}
+  \caption{\stellar{} mainnet fit for credential anchoring}
   \renewcommand{\arraystretch}{1.25}
-  \begin{tabularx}{\textwidth}{@{}>{\bfseries}p{3.5cm} >{\raggedright\arraybackslash}X >{\raggedright\arraybackslash}X@{}}
+  \begin{tabularx}{\textwidth}{@{}>{\bfseries}p{3.5cm} X@{}}
     \toprule
-    Dimension & Ethereum Mainnet & \stellar{} Mainnet \\
+    Dimension & \stellar{} Mainnet \\
     \midrule
-    Avg.\ tx cost & \$1--\$50+ (variable) & \$0.00001--\$0.001 \\
-    Contract language & Solidity (EVM) & Rust (\soroban{}) \\
-    Finality & $\sim$12 sec (L1) & 3--5 sec \\
-    Cross-border focus & DeFi-native & Payments \& remittance native \\
-    India fintech narrative & Speculation concerns & Financial inclusion alignment \\
-    Residency support & None & Rise In mainnet sponsorship \\
+    Avg.\ tx cost & \$0.00001--\$0.001 \\
+    Contract language & Rust (\soroban{}) \\
+    Finality & 3--5 sec \\
+    Cross-border focus & Payments \& remittance native \\
+    India fintech narrative & Financial inclusion alignment \\
+    Residency support & Rise In / Garage mainnet sponsorship \\
     \bottomrule
   \end{tabularx}
 \end{table}
@@ -629,30 +629,30 @@ Charge verifiers for each successful ZK proof verification via REST API.
 \end{table}
 
 % ═════════════════════════════════════════════════════════════════════════════
-\section{Technical Roadmap: Ethereum to \stellar{}}
+\section{Technical Roadmap on \stellar{}}
 
-\subsection{Migration Scope}
+\subsection{Build Scope}
 
-The existing Ethereum Sepolia MVP provides production-grade business logic, API design, ZK engine, and frontend UX. The Stellar residency focuses on \textbf{contract port + wallet/auth adaptation + mainnet deployment}, not a full rewrite of the ZK cryptography layer.
+\krydo{} ships production-grade business logic, API design, ZK engine, and frontend UX on \stellar{}. The residency focuses on \textbf{Soroban contract hardening + Freighter wallet/auth + mainnet deployment}.
 
 \begin{table}[H]
   \centering
-  \caption{Component migration matrix}
+  \caption{Stellar component matrix}
   \renewcommand{\arraystretch}{1.2}
   \small
-  \begin{tabularx}{\textwidth}{@{}>{\bfseries}p{2.8cm} p{3.5cm} X@{}}
+  \begin{tabularx}{\textwidth}{@{}>{\bfseries}p{2.8cm} X@{}}
     \toprule
-    Component & Current (Ethereum) & Target (\stellar{}) \\
+    Component & Implementation \\
     \midrule
-    Authority contract & \texttt{KrydoAuthority.sol} & Soroban Rust: issuer whitelist \\
-    Credentials contract & \texttt{KrydoCredentials.sol} & Soroban Rust: hash anchor + revocation \\
-    Audit contract & \texttt{KrydoAudit.sol} & Soroban Rust: event anchoring \\
-    Blockchain SDK & ethers v6 & @stellar/stellar-sdk + Soroban RPC \\
-    Wallet & MetaMask, wagmi, RainbowKit & Freighter, Albedo, Stellar Wallet Kit \\
-    Auth & EIP-4361 SIWE + JWT & Stellar signature auth + JWT \\
-    ZK engine & secp256k1 Pedersen + sigma & Off-chain proofs retained; on-chain anchor only (MVP) \\
-    Database & Firebase Firestore & Unchanged \\
-    Frontend & React + Vite & Adapt wallet layer; update network badges \\
+    Authority contract & Soroban Rust: issuer whitelist \\
+    Credentials contract & Soroban Rust: hash anchor + revocation \\
+    Audit contract & Soroban Rust: event anchoring \\
+    Blockchain SDK & @stellar/stellar-sdk + Soroban RPC \\
+    Wallet & Freighter, Albedo, Stellar Wallet Kit \\
+    Auth & Sign-in-with-Stellar (SEP-53) + JWT \\
+    ZK engine & Off-chain Pedersen + sigma proofs; on-chain hash anchor \\
+    Database & Firebase Firestore \\
+    Frontend & React + Vite + Freighter \\
     \bottomrule
   \end{tabularx}
 \end{table}
@@ -701,7 +701,7 @@ The existing Ethereum Sepolia MVP provides production-grade business logic, API 
 
 \begin{enumerate}
   \item On-chain \soroban{} ZK verifier (Groth16/PLONK) for trustless verification
-  \item Ed25519-native Pedersen commitments (full cryptographic port from secp256k1)
+  \item Ed25519-native Pedersen commitments (optional crypto alignment with account keys)
   \item Multi-sig root authority and decentralised issuer governance
   \item Third-party cryptographic audit before regulated financial production use
   \item SOC-2 equivalent backend certification
@@ -801,7 +801,7 @@ The existing Ethereum Sepolia MVP provides production-grade business logic, API 
 
     21-day timeline insufficient & High &
     Incomplete mainnet deploy &
-    Ruthless scope cut; pre-built Ethereum demo as fallback narrative \\
+    Ruthless scope cut; staged demo with Testnet fallback if Mainnet timing slips \\
 
     No paying customers post-residency & Medium &
     Revenue gap &
@@ -889,7 +889,7 @@ The existing Ethereum Sepolia MVP provides production-grade business logic, API 
     GET & \texttt{/verify/:id} & Public verification page (QR target) \\
     POST & \texttt{/api/credentials/issue} & Issue credential (issuer role) \\
     GET & \texttt{/api/issuers} & List whitelisted issuers \\
-    POST & \texttt{/api/auth/siwe} & Wallet authentication (Stellar adapt.) \\
+    POST & \texttt{/api/auth/verify} & Wallet authentication (SIWS) \\
     \bottomrule
   \end{tabularx}
 \end{table}

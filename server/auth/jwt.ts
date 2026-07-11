@@ -91,7 +91,7 @@ export function requireSelf(field: { param?: string; bodyKey?: string }) {
     if (!candidate || typeof candidate !== "string") {
       return res.status(400).json({ message: "Address missing from request" });
     }
-    if (candidate.toLowerCase() !== req.auth.sub.toLowerCase()) {
+    if (candidate !== req.auth.sub) {
       return res.status(403).json({ message: "Address does not match authenticated wallet" });
     }
     next();

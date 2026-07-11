@@ -1,5 +1,5 @@
 /**
- * Small module-global store for the SIWE-issued JWT. We keep it in
+ * Small module-global store for the SIWS-issued JWT. We keep it in
  * localStorage so it survives reloads, and we cache it in memory for fast
  * access on every request without touching the Storage API.
  */

@@ -105,9 +105,9 @@ export default function RequestCredentialPage() {
       });
       const request = await res.json();
 
-      // Step 2: Freighter popup — holder signs a self-tx with encoded
+      // Step 2: wallet popup — holder signs a self-tx with encoded
       // KRYDO_CRED_REQUEST_V1 payload to anchor the request on Stellar.
-      setReqStep("Waiting for Freighter approval...");
+      setReqStep("Waiting for wallet approval...");
       let txResult: { txHash: string; blockNumber: number };
       try {
         txResult = await anchorCredentialRequestViaWallet(
@@ -117,7 +117,7 @@ export default function RequestCredentialPage() {
           "request_created",
         );
       } catch (err: any) {
-        // Freighter cancel / rejection — roll back the pending request on
+        // Wallet cancel / rejection — roll back the pending request on
         // the server so the issuer never sees an un-anchored, un-consented
         // request. Any other error also rolls back to keep the UI
         // consistent with the user's intent.

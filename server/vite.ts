@@ -1,31 +1,56 @@
 import { type Express } from "express";
 import { createServer as createViteServer, createLogger } from "vite";
 import { type Server } from "http";
-import viteConfig from "../vite.config";
+import react from "@vitejs/plugin-react";
 import fs from "fs";
 import path from "path";
+import { fileURLToPath } from "url";
 import { nanoid } from "nanoid";
 
 const viteLogger = createLogger();
+const __dirname = path.dirname(fileURLToPath(import.meta.url));
+const root = path.resolve(__dirname, "..");
 
 export async function setupVite(server: Server, app: Express) {
-  const serverOptions = {
-    middlewareMode: true,
-    hmr: { server, path: "/vite-hmr" },
-    allowedHosts: true as const,
-  };
-
   const vite = await createViteServer({
-    ...viteConfig,
     configFile: false,
+    root: path.resolve(root, "client"),
+    plugins: [react()],
+    define: {
+      global: "globalThis",
+    },
+    resolve: {
+      alias: {
+        "@": path.resolve(root, "client", "src"),
+        "@shared": path.resolve(root, "shared"),
+        buffer: "buffer",
+      },
+    },
+    optimizeDeps: {
+      include: [
+        "@creit.tech/stellar-wallets-kit",
+        "@creit.tech/stellar-wallets-kit/modules/utils",
+        "buffer",
+      ],
+      esbuildOptions: {
+        define: { global: "globalThis" },
+      },
+    },
     customLogger: {
       ...viteLogger,
       error: (msg, options) => {
         viteLogger.error(msg, options);
-        process.exit(1);
+        // Don't hard-exit the whole process on a single HMR error on Windows.
+        console.error("[vite]", msg);
       },
     },
-    server: serverOptions,
+    server: {
+      middlewareMode: true,
+      // Avoid attaching HMR to the same HTTP server — that combo has been
+      // crashing Node with STATUS_HEAP_CORRUPTION on Windows in this repo.
+      hmr: false,
+      allowedHosts: true as const,
+    },
     appType: "custom",
   });
 
@@ -35,14 +60,7 @@ export async function setupVite(server: Server, app: Express) {
     const url = req.originalUrl;
 
     try {
-      const clientTemplate = path.resolve(
-        import.meta.dirname,
-        "..",
-        "client",
-        "index.html",
-      );
-
-      // always reload the index.html file from disk incase it changes
+      const clientTemplate = path.resolve(root, "client", "index.html");
       let template = await fs.promises.readFile(clientTemplate, "utf-8");
       template = template.replace(
         `src="/src/main.tsx"`,

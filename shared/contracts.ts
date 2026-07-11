@@ -1,6 +1,6 @@
 /**
  * Single source of truth for deployed-contract metadata, shared between
- * `server/*` (Stellar SDK + Soroban RPC) and `client/src/*` (Freighter signer).
+ * `server/*` (Stellar SDK + Soroban RPC) and `client/src/*` (wallet kit signer).
  *
  * The deployment JSON is produced by `script/deploy.ts` after running
  * `stellar contract deploy`; it contains the Soroban contract ids and the

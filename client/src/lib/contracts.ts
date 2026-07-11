@@ -1,14 +1,12 @@
 /**
  * Client-side Soroban contract helpers.
  *
- * Each state-changing helper builds a Soroban invocation, has Freighter sign
- * it (non-custodial — the key never leaves the wallet), submits it via the
- * Soroban RPC, and waits for confirmation. Read helpers use simulation only.
+ * Each state-changing helper builds a Soroban invocation, has the active
+ * Stellar Wallets Kit module sign it (non-custodial), submits via Soroban RPC,
+ * and waits for confirmation. Read helpers use simulation only.
  *
- * The connected account is read from Freighter directly, so no provider bridge
- * is needed. These functions require the contracts to be deployed (contract
- * ids present in `contracts/deployment.json`); until then they throw a clear
- * error instead of a cryptic RPC failure.
+ * These functions require the contracts to be deployed (contract ids in
+ * `contracts/deployment.json`); until then they throw a clear error.
  */
 import { sha256 } from "@noble/hashes/sha2.js";
 import {
@@ -21,7 +19,6 @@ import {
   xdr,
   BASE_FEE,
 } from "@stellar/stellar-sdk";
-import { getAddress, signTransaction } from "@stellar/freighter-api";
 import {
   AUTHORITY_ID,
   CREDENTIALS_ID,
@@ -29,6 +26,7 @@ import {
   NETWORK_PASSPHRASE,
   SOROBAN_RPC_URL,
 } from "@shared/contracts";
+import { ensureWalletKit, expectedPassphrase } from "./wallet-kit";
 
 export interface TxResult {
   txHash: string;
@@ -51,8 +49,9 @@ function requireContract(id: string, name: string): string {
 }
 
 async function connectedAddress(): Promise<string> {
-  const got = await getAddress();
-  if (got.error || !got.address) {
+  const kit = ensureWalletKit();
+  const got = await kit.getAddress();
+  if (!got.address) {
     throw new Error("No connected Stellar account. Connect your wallet first.");
   }
   return got.address;
@@ -100,11 +99,14 @@ async function invokeViaWallet(
 
   const prepared = await server.prepareTransaction(tx);
 
-  const signed = await signTransaction(prepared.toXDR(), {
+  const kit = ensureWalletKit();
+  const signed = await kit.signTransaction(prepared.toXDR(), {
     address: caller,
-    networkPassphrase: NETWORK_PASSPHRASE,
+    networkPassphrase: expectedPassphrase(),
   });
-  if (signed.error) throw new Error(String(signed.error));
+  if (!signed.signedTxXdr) {
+    throw new Error("Wallet returned an empty signed transaction");
+  }
 
   const signedTx = TransactionBuilder.fromXDR(signed.signedTxXdr, NETWORK_PASSPHRASE);
   const sent = await server.sendTransaction(signedTx);

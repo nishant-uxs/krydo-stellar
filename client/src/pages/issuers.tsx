@@ -81,14 +81,14 @@ export default function IssuersPage() {
       let onChainTxHash: string | undefined;
       let blockNumber: number | undefined;
       try {
-        setMutationStep("Approve in Freighter...");
+        setMutationStep("Approve in your wallet...");
         const txResult = await addIssuerViaWallet(data.walletAddress, data.name);
         onChainTxHash = txResult.txHash;
         blockNumber = txResult.blockNumber;
         setMutationStep("Confirming on Stellar...");
       } catch (err: any) {
         if (err.code === 4001 || err.code === "ACTION_REJECTED") {
-          throw new Error("Transaction rejected in Freighter");
+          throw new Error("Transaction rejected in wallet");
         }
         throw err;
       }
@@ -131,7 +131,7 @@ export default function IssuersPage() {
       const issuerData = issuers?.find((i) => i.id === issuerId);
       if (!issuerData) throw new Error("Issuer not found");
 
-      setMutationStep("Waiting for Freighter approval...");
+      setMutationStep("Waiting for wallet approval...");
       let onChainTxHash: string | undefined;
       let blockNumber: number | undefined;
       try {
@@ -140,7 +140,7 @@ export default function IssuersPage() {
         blockNumber = txResult.blockNumber;
       } catch (err: any) {
         if (err.code === 4001 || err.code === "ACTION_REJECTED") {
-          throw new Error("Transaction rejected in Freighter");
+          throw new Error("Transaction rejected in wallet");
         }
         throw err;
       }

@@ -213,14 +213,22 @@ export async function isIssuerOnChain(address: string): Promise<boolean> {
 // ---------- KrydoCredentials ----------
 
 export async function issueCredentialOnChain(
+  issuerAddress: string,
   credentialHash: string,
   holderAddress: string,
   claimType: string,
   claimSummary: string,
 ): Promise<OnChainResult> {
   const { source } = requireReady();
+  // Soroban `issuer.require_auth()` — server can only sign as DEPLOYER_SECRET.
+  // Real issuers must submit a Freighter-signed tx (clientTxHash path).
+  if (source.publicKey() !== issuerAddress) {
+    throw new Error(
+      "Server key cannot authorize this issuer. Use Freighter to sign issue_credential on-chain.",
+    );
+  }
   return invokeSigned(CREDENTIALS_ID, "issue_credential", [
-    addrArg(source.publicKey()),
+    addrArg(issuerAddress),
     bytes32Arg(credentialHash),
     addrArg(holderAddress),
     strArg(claimType),
@@ -228,10 +236,18 @@ export async function issueCredentialOnChain(
   ]);
 }
 
-export async function revokeCredentialOnChain(credentialHash: string): Promise<OnChainResult> {
+export async function revokeCredentialOnChain(
+  issuerAddress: string,
+  credentialHash: string,
+): Promise<OnChainResult> {
   const { source } = requireReady();
+  if (source.publicKey() !== issuerAddress) {
+    throw new Error(
+      "Server key cannot authorize this issuer. Use Freighter to sign revoke_credential on-chain.",
+    );
+  }
   return invokeSigned(CREDENTIALS_ID, "revoke_credential", [
-    addrArg(source.publicKey()),
+    addrArg(issuerAddress),
     bytes32Arg(credentialHash),
   ]);
 }

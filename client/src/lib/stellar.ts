@@ -2,7 +2,7 @@
  * Stellar network configuration for the client.
  *
  * Mirrors the shared deployment metadata so the browser signs on the same
- * network the server anchors to. Replaces the old wagmi/EVM chain config.
+ * network the server anchors to.
  */
 import {
   AUTHORITY_ID,

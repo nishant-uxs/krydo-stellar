@@ -3,13 +3,13 @@ import { sha256 as nobleSha256 } from "@noble/hashes/sha2.js";
 import { bytesToHex, hexToBytes, utf8ToBytes, concatBytes } from "@noble/hashes/utils.js";
 
 /**
- * Low-level elliptic-curve primitives used by the Krydo ZK stack. We commit to
- * secp256k1 (via @noble/curves) as a well-audited prime-order group; we never
- * need pairings. Note this is independent of Stellar's ed25519 account keys —
- * it only backs the ZK commitments below.
+ * Low-level elliptic-curve primitives used by the Krydo ZK stack. We use a
+ * well-audited prime-order group via `@noble/curves`; we never need pairings.
+ * Note this is independent of Stellar's ed25519 account keys — it only backs
+ * the off-chain ZK commitments below.
  * The "real ZK" here is sigma-protocol-based (Pedersen + Schnorr + OR-proofs),
  * not SNARKs, but it is cryptographically sound: soundness + honest-verifier ZK
- * under the discrete-log assumption on secp256k1.
+ * under the discrete-log assumption on the commitment curve.
  */
 
 export const Point = secp256k1.Point;

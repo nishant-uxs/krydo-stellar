@@ -223,7 +223,7 @@ flowchart LR
     CLIENT --> CLI_PAGES["src/pages/<br/>dashboard, issuers,<br/>credentials, zk-proofs, verify"]
     CLIENT --> CLI_COMP["src/components/"]
 
-    SERVER --> SRV_AUTH["auth/<br/>siwe (sign-in-with-stellar), jwt"]
+    SERVER --> SRV_AUTH["auth/<br/>siws (sign-in-with-stellar), jwt"]
     SERVER --> SRV_CRYPTO["crypto/<br/>ec, pedersen, sigma"]
     SERVER --> SRV_ROUTES["routes/<br/>issuers, credentials,<br/>credential-requests,<br/>zk, stats, health, network"]
     SERVER --> SRV_MIDDLE["middleware/<br/>security, pagination"]
@@ -242,7 +242,7 @@ flowchart LR
 
 ## 5. Authentication — Sign-in-with-Stellar + JWT
 
-Krydo does not use passwords or OAuth. Every authenticated session is bootstrapped by a Stellar account signing a canonical challenge message over a server-issued nonce — a Sign-in-with-Stellar flow (the Stellar analogue of EIP-4361). Freighter signs the raw message bytes with the account's ed25519 key; the server verifies the signature with `Keypair.verify` against the claimed public key, then issues a short-lived JWT whose `sub` is the StrKey account address (`G...`, 56 chars, case-sensitive).
+Krydo does not use passwords or OAuth. Every authenticated session is bootstrapped by a Stellar account signing a canonical challenge message over a server-issued nonce — Sign-in-with-Stellar (SIWS). Freighter signs per SEP-53 with the account's ed25519 key; the server verifies with `verifySep53Message`, then issues a short-lived JWT whose `sub` is the StrKey account address (`G...`, 56 chars, case-sensitive).
 
 ```mermaid
 sequenceDiagram
@@ -444,7 +444,7 @@ flowchart TD
 
 ## 9. Zero-knowledge proof system
 
-Krydo uses **sigma protocols** over Pedersen commitments on `secp256k1`, made non-interactive via Fiat–Shamir. No circuits, no trusted setup. Six proof types are implemented; see [`server/zk-engine.ts`](./server/zk-engine.ts) and [`server/crypto/sigma.ts`](./server/crypto/sigma.ts).
+Krydo uses **sigma protocols** over Pedersen commitments on a prime-order elliptic curve (via `@noble/curves`), made non-interactive via Fiat–Shamir. No circuits, no trusted setup. Six proof types are implemented; see [`server/zk-engine.ts`](./server/zk-engine.ts) and [`server/crypto/sigma.ts`](./server/crypto/sigma.ts).
 
 ```mermaid
 mindmap
@@ -806,7 +806,7 @@ flowchart TB
         BG3["credential not expired / revoked"]
     end
     subgraph L7["L7 — Crypto"]
-        SP["sigma protocols verify<br/>(secp256k1)"]
+        SP["sigma protocols verify<br/>(Pedersen + Fiat–Shamir)"]
         EC["ed25519 Keypair.verify<br/>(auth signatures)"]
         KC["sha256 canonicalization"]
     end

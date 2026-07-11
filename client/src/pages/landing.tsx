@@ -366,7 +366,7 @@ export default function Landing() {
                 <div className="mt-4 flex items-center justify-between bg-white/5 backdrop-blur-md p-2.5 rounded-xl border border-white/5 text-[10px] text-muted-foreground/80">
                   <div className="flex items-center gap-1.5">
                     <Fingerprint className="w-3.5 h-3.5 text-chart-2 animate-pulse" />
-                    <span>secp256k1 Sigma Proof</span>
+                    <span>Sigma ZK Proof</span>
                   </div>
                   <span>Gasless &amp; Instant</span>
                 </div>
@@ -503,7 +503,7 @@ export default function Landing() {
             </Badge>
             <h2 className="font-serif text-3xl md:text-4xl font-bold mb-4 tracking-tight">How Krydo Works on Stellar</h2>
             <p className="text-muted-foreground font-sans text-sm md:text-base">
-              A comprehensive verifiable credential ecosystem leveraging Soroban smart contracts and Freighter wallet signatures.
+              A comprehensive verifiable credential ecosystem leveraging Soroban smart contracts and Stellar wallet signatures.
             </p>
           </div>
 
@@ -640,7 +640,7 @@ export default function Landing() {
                         </div>
                         <div className="flex justify-between">
                           <span className="text-muted-foreground">Random Blinding Factor (r):</span>
-                          <span className="text-chart-2 truncate max-w-[140px]">r_secp256k1_5a210bc931e2</span>
+                          <span className="text-chart-2 truncate max-w-[140px]">r_sigma_5a210bc931e2</span>
                         </div>
                         <div className="flex justify-between border-t border-white/5 pt-2 text-[10px]">
                           <span className="text-muted-foreground">Client CPU Performance:</span>
@@ -1018,7 +1018,7 @@ export default function Landing() {
             
             <h2 className="font-serif text-3xl md:text-4xl font-bold mb-4 tracking-tight">Ready to verify on Stellar?</h2>
             <p className="text-muted-foreground font-sans text-sm md:text-base max-w-lg mx-auto mb-8">
-              Experience the future of financial trust. Connect your Freighter wallet to explore or verify any credential instantly.
+              Experience the future of financial trust. Connect your Stellar wallet to explore or verify any credential instantly.
             </p>
             <div className="flex justify-center flex-wrap gap-4">
               <Button 
@@ -1028,7 +1028,7 @@ export default function Landing() {
                 className="bg-primary hover:bg-primary/90 text-primary-foreground font-semibold rounded-full shadow-lg px-8 py-6 transition-all duration-300"
               >
                 <SiStellar className="w-4.5 h-4.5 mr-2" />
-                {isConnecting ? "Signing in..." : "Launch App with Freighter"}
+                {isConnecting ? "Signing in..." : "Launch App"}
               </Button>
             </div>
           </div>

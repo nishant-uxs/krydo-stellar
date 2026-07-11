@@ -81,7 +81,7 @@ export default function IssueCredentialPage() {
     mutationFn: async (params: { id: string; status: string; responseMessage?: string; claimSummary?: string; claimValue?: string; expiresAt?: string; onChainTxHash?: string }) => {
       const { id, status, ...body } = params;
 
-      // --- Rejection path: single POST, no Freighter popup needed. ---------
+      // --- Rejection path: single POST, no wallet popup needed. ---------
       // Server still anchors the rejection on-chain via its root wallet;
       // that's purely audit and doesn't require issuer consent.
       if (status === "rejected") {
@@ -93,14 +93,14 @@ export default function IssueCredentialPage() {
         return res.json();
       }
 
-      // --- Approval path: Full-SSI 3-step flow with Freighter popup --------
+      // --- Approval path: Full-SSI 3-step flow with wallet popup --------
       //  1. POST /respond with prepareOnly=true → server stages credential,
       //     returns canonical credentialHash, marks request "issuing".
-      //  2. Issuer signs issueCredential via Freighter → real tx hash.
+      //  2. Issuer signs issueCredential via wallet → real tx hash.
       //  3a. PATCH /api/credentials/:id/tx → server verifies Stellar receipt.
       //  3b. POST /respond with finalize=true → server marks request "issued".
       //
-      // If the user rejects the Freighter popup at step 2, the staged
+      // If the user rejects the wallet popup at step 2, the staged
       // credential + request stay in "issuing" state. They can retry later
       // via the Re-anchor button on the Issued tab.
       setMutationStep("Staging credential...");
@@ -116,7 +116,7 @@ export default function IssueCredentialPage() {
         throw new Error("Server did not return a staged credential");
       }
 
-      setMutationStep("Waiting for Freighter approval...");
+      setMutationStep("Waiting for wallet approval...");
       let txResult: { txHash: string; blockNumber: number };
       try {
         txResult = await issueCredentialViaWallet(
@@ -127,7 +127,7 @@ export default function IssueCredentialPage() {
         );
       } catch (err: any) {
         if (err.code === 4001 || err.code === "ACTION_REJECTED") {
-          throw new Error("Transaction rejected in Freighter. The credential is staged but not anchored — retry from the Pending tab.");
+          throw new Error("Transaction rejected in wallet. The credential is staged but not anchored — retry from the Pending tab.");
         }
         throw err;
       }
@@ -231,7 +231,7 @@ export default function IssueCredentialPage() {
       let blockNumber: number | undefined;
       let confirmWarning: string | undefined;
       try {
-        setMutationStep("Waiting for Freighter approval...");
+        setMutationStep("Waiting for wallet approval...");
         const txResult = await issueCredentialViaWallet(
           credential.credentialHash,
           data.holderAddress,
@@ -253,7 +253,7 @@ export default function IssueCredentialPage() {
       // wrong-chain / reverted tx would leave the UI permanently stuck on
       // the server's random placeholder hash. We now surface server-side
       // failures as a *warning* (the credential itself is already saved +
-      // Freighter already confirmed locally) and the user can hit the
+      // wallet already confirmed locally) and the user can hit the
       // Re-anchor button on the Issued tab to retry.
       setMutationStep("Confirming on Stellar...");
       try {
@@ -288,7 +288,7 @@ export default function IssueCredentialPage() {
       if (data.confirmWarning) {
         toast({
           title: "Credential issued — confirmation pending",
-          description: "Freighter confirmed the tx, but the server could not verify it yet. Use Re-anchor on the Issued tab if this persists.",
+          description: "Wallet confirmed the tx, but the server could not verify it yet. Use Re-anchor on the Issued tab if this persists.",
           variant: "destructive",
         });
       }
@@ -310,7 +310,7 @@ export default function IssueCredentialPage() {
   // was never confirmed (legacy records from before the PATCH endpoint
   // started verifying receipts, or records where the user's wallet dropped
   // the tx). The server signs + submits from its root wallet so the user
-  // doesn't need to open Freighter; endpoint is idempotent.
+  // doesn't need to open the wallet; endpoint is idempotent.
   const reanchorMutation = useMutation({
     mutationFn: async (credId: string) => {
       setMutationStep("Re-anchoring on Stellar...");
@@ -348,7 +348,7 @@ export default function IssueCredentialPage() {
       const credData = issuedCredentials?.find((c) => c.id === credId);
       if (!credData) throw new Error("Credential not found");
 
-      setMutationStep("Waiting for Freighter approval...");
+      setMutationStep("Waiting for wallet approval...");
       let onChainTxHash: string | undefined;
       let blockNumber: number | undefined;
       try {
@@ -357,7 +357,7 @@ export default function IssueCredentialPage() {
         blockNumber = txResult.blockNumber;
       } catch (err: any) {
         if (err.code === 4001 || err.code === "ACTION_REJECTED") {
-          throw new Error("Transaction rejected in Freighter");
+          throw new Error("Transaction rejected in wallet");
         }
         throw err;
       }
@@ -441,7 +441,7 @@ export default function IssueCredentialPage() {
                 setConfirmInfo({
                   action: "issue_credential",
                   title: "Issue New Credential",
-                  description: "This will save the credential, then open Freighter to record it on the Stellar network.",
+                  description: "This will save the credential, then open your wallet to record it on the Stellar network.",
                   details: [
                     { label: "Action", value: "Issue Credential On-Chain" },
                     { label: "Type", value: claimTypeLabels[data.claimType] || data.claimType },

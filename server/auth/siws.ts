@@ -1,6 +1,5 @@
 import type { Express, Request, Response } from "express";
 import { z } from "zod";
-import { Keypair } from "@stellar/stellar-sdk";
 import { storage } from "../storage";
 import {
   getDeployment,
@@ -9,6 +8,7 @@ import {
   anchorRoleAssignmentOnChain,
 } from "../blockchain";
 import { stellarAddressSchema, type WalletRole } from "@shared/schema";
+import { verifySep53Message } from "@shared/sep53";
 import { issueNonce, consumeNonce } from "./nonce-store";
 import { signAuthToken } from "./jwt";
 import { sensitiveLimiter } from "../middleware/security";
@@ -17,13 +17,12 @@ import { childLogger } from "../logger";
 const log = childLogger("auth/siws");
 
 /**
- * "Sign in with Stellar" — the Stellar analogue of EIP-4361 SIWE.
+ * Sign-in-with-Stellar (SIWS).
  *
  * The client fetches a server-issued nonce, builds a canonical human-readable
- * message embedding that nonce + its own address, and signs the raw message
- * bytes with its Stellar key (via Freighter). We verify the ed25519 signature
- * against the claimed public key, consume the single-use nonce, then issue a
- * short-lived JWT.
+ * message embedding that nonce + its own address, and has Freighter sign it
+ * per SEP-53. We verify with `verifySep53Message` (NOT raw Keypair.verify on
+ * UTF-8 bytes — Freighter signs SHA-256("Stellar Signed Message:\\n" + msg)).
  */
 const verifySchema = z.object({
   address: stellarAddressSchema,
@@ -63,15 +62,8 @@ export function registerAuthRoutes(app: Express) {
       }
       const nonce = nonceMatch[1];
 
-      // Verify the ed25519 signature over the raw UTF-8 message bytes.
-      let verified = false;
-      try {
-        const kp = Keypair.fromPublicKey(address);
-        verified = kp.verify(Buffer.from(message, "utf8"), Buffer.from(signature, "base64"));
-      } catch {
-        verified = false;
-      }
-      if (!verified) {
+      // Freighter signs per SEP-53 — verify the prefixed SHA-256 payload.
+      if (!verifySep53Message(address, message, signature)) {
         return res.status(401).json({ message: "Signature verification failed" });
       }
 

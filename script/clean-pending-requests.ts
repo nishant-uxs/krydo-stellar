@@ -11,7 +11,7 @@
  *   npm run clean:pending-requests
  *
  *   # delete only a specific requester's pending-unanchored requests
- *   npm run clean:pending-requests -- 0xabc...def
+ *   npm run clean:pending-requests -- GABC...XYZ
  */
 import "dotenv/config";
 // Importing db initializes firebase-admin as a side-effect.

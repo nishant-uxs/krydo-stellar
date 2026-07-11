@@ -47,7 +47,7 @@ async function main() {
       const onChain = await verifyCredentialOnChain(cred.credentialHash);
       if (
         onChain.valid &&
-        onChain.holder.toLowerCase() === cred.holderAddress.toLowerCase()
+        onChain.holder === cred.holderAddress
       ) {
         console.log("already on-chain, skip");
         confirmed++;
@@ -61,6 +61,7 @@ async function main() {
       }
 
       const { txHash, blockNumber } = await issueCredentialOnChain(
+        cred.issuerAddress,
         cred.credentialHash,
         cred.holderAddress,
         cred.claimType,

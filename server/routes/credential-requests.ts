@@ -110,8 +110,8 @@ export function registerCredentialRequestRoutes(app: Express) {
       const request = await storage.getCredentialRequest(id);
       if (!request) return res.status(404).json({ message: "Request not found" });
 
-      const caller = req.auth!.sub.toLowerCase();
-      const isOwner = request.requesterAddress.toLowerCase() === caller;
+      const caller = req.auth!.sub;
+      const isOwner = request.requesterAddress === caller;
       const isRoot = req.auth!.role === "root";
       if (!isOwner && !isRoot) {
         return res
@@ -192,8 +192,8 @@ export function registerCredentialRequestRoutes(app: Express) {
       const request = await storage.getCredentialRequest(id);
       if (!request) return res.status(404).json({ message: "Request not found" });
 
-      const caller = req.auth!.sub.toLowerCase();
-      const isOwner = request.requesterAddress.toLowerCase() === caller;
+      const caller = req.auth!.sub;
+      const isOwner = request.requesterAddress === caller;
       const isRoot = req.auth!.role === "root";
       if (!isOwner && !isRoot) {
         return res.status(403).json({ message: "Only the requester can delete this request" });
@@ -292,7 +292,7 @@ export function registerCredentialRequestRoutes(app: Express) {
         }
 
         if (request.issuerAddress) {
-          if (issuer.walletAddress.toLowerCase() !== request.issuerAddress.toLowerCase()) {
+          if (issuer.walletAddress !== request.issuerAddress) {
             return res
               .status(403)
               .json({ message: "You can only respond to requests addressed to you" });
@@ -362,8 +362,8 @@ export function registerCredentialRequestRoutes(app: Express) {
           // Safety: make sure this staged credential actually belongs to this
           // request + issuer (prevents crossing wires between requests).
           if (
-            credential.issuerAddress.toLowerCase() !== issuer.walletAddress.toLowerCase() ||
-            credential.holderAddress.toLowerCase() !== request.requesterAddress.toLowerCase()
+            credential.issuerAddress !== issuer.walletAddress ||
+            credential.holderAddress !== request.requesterAddress
           ) {
             return res.status(403).json({
               message: "Staged credential does not match this request",
@@ -445,6 +445,7 @@ export function registerCredentialRequestRoutes(app: Express) {
         } else if (isBlockchainReady()) {
           try {
             const issueRes = await issueCredentialOnChain(
+              req.auth!.sub,
               result.credential.credentialHash,
               request.requesterAddress,
               request.claimType,

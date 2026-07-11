@@ -14,7 +14,7 @@ import {
 
 describe("ec.ts — elliptic-curve primitives", () => {
   describe("generators G and H", () => {
-    it("G is the secp256k1 base point", () => {
+    it("G is the curve base point", () => {
       // G.toHex should produce the well-known compressed serialization.
       const hex = pointToHex(G);
       expect(hex.length).toBe(66); // 33 bytes compressed

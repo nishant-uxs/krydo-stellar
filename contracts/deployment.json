@@ -4,11 +4,17 @@
   "rpcUrl": "https://soroban-testnet.stellar.org",
   "horizonUrl": "https://horizon-testnet.stellar.org",
   "explorerUrl": "https://stellar.expert/explorer/testnet",
-  "deployer": "",
-  "deployedAt": "",
+  "deployer": "GC5VBHY5DWV7NTL4PCQL3XGOE4FY2DJHM2JYLRC6YS2IHYTPDZ4DOFIU",
+  "deployedAt": "2026-07-11T05:55:01.728Z",
   "contracts": {
-    "KrydoAuthority": { "contractId": "" },
-    "KrydoCredentials": { "contractId": "" },
-    "KrydoAudit": { "contractId": "" }
+    "KrydoAuthority": {
+      "contractId": "CDBYAPYW34OCTNMTT3H75XLC2JRA7HD4ULA5YVJ75SISM67GPCD6FNK2"
+    },
+    "KrydoCredentials": {
+      "contractId": "CD7PFDNVL2V4SO4WQWP225CJRYV24GIGM3ZALS2WHIEM6UINQK7KJCOV"
+    },
+    "KrydoAudit": {
+      "contractId": "CALAZRCMK2POSKYEXA7LB3SPIBU5555SD5LX53LHC2YYCSZMYEQVXJSX"
+    }
   }
 }

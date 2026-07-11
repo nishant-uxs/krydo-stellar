@@ -9,9 +9,9 @@ import {
 } from "./crypto/sigma.js";
 
 /**
- * Krydo ZK engine — cryptographically sound sigma-protocol proofs on
- * secp256k1. Replaces the previous hash-only placeholder with real
- * Pedersen-commitment-based proofs that a verifier can actually trust.
+ * Krydo ZK engine — cryptographically sound sigma-protocol proofs over
+ * Pedersen commitments. Replaces the previous hash-only placeholder with real
+ * commitment-based proofs that a verifier can actually trust.
  *
  * Proof types supported:
  *   - range_above     : prove  value >= threshold,   threshold public

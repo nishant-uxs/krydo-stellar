@@ -135,6 +135,7 @@ export function registerCredentialRoutes(app: Express) {
         } else if (isBlockchainReady()) {
           try {
             const { txHash, blockNumber } = await issueCredentialOnChain(
+              data.issuerAddress,
               result.credential.credentialHash,
               data.holderAddress,
               data.claimType,
@@ -191,8 +192,8 @@ export function registerCredentialRoutes(app: Express) {
 
       // Lock this endpoint to the issuer (or the root authority) — the
       // holder shouldn't be able to rewrite an issuer's on-chain record.
-      const caller = req.auth!.sub.toLowerCase();
-      const isIssuer = credential.issuerAddress.toLowerCase() === caller;
+      const caller = req.auth!.sub;
+      const isIssuer = credential.issuerAddress === caller;
       const isRoot = req.auth!.role === "root";
       if (!isIssuer && !isRoot) {
         return res
@@ -276,8 +277,8 @@ export function registerCredentialRoutes(app: Express) {
       const credential = await storage.getCredentialById(id);
       if (!credential) return res.status(404).json({ message: "Credential not found" });
 
-      const caller = req.auth!.sub.toLowerCase();
-      const isIssuer = credential.issuerAddress.toLowerCase() === caller;
+      const caller = req.auth!.sub;
+      const isIssuer = credential.issuerAddress === caller;
       const isRoot = req.auth!.role === "root";
       if (!isIssuer && !isRoot) {
         return res
@@ -295,7 +296,7 @@ export function registerCredentialRoutes(app: Express) {
       const onChain = await verifyCredentialOnChain(credential.credentialHash);
       if (
         onChain.valid &&
-        onChain.holder.toLowerCase() === credential.holderAddress.toLowerCase()
+        onChain.holder === credential.holderAddress
       ) {
         return res.json({
           success: true,
@@ -308,6 +309,7 @@ export function registerCredentialRoutes(app: Express) {
       const credTx = txs.find((t) => t.data && (t.data as any).credentialId === id);
 
       const { txHash, blockNumber } = await issueCredentialOnChain(
+        credential.issuerAddress,
         credential.credentialHash,
         credential.holderAddress,
         credential.claimType,
@@ -335,7 +337,7 @@ export function registerCredentialRoutes(app: Express) {
       const credential = await storage.getCredentialById(id);
       if (!credential) return res.status(404).json({ message: "Credential not found" });
 
-      const isIssuer = credential.issuerAddress.toLowerCase() === revokedBy;
+      const isIssuer = credential.issuerAddress === revokedBy;
       const isRoot = req.auth!.role === "root";
       if (!isIssuer && !isRoot) {
         return res
@@ -350,7 +352,8 @@ export function registerCredentialRoutes(app: Express) {
       let chainBlock: string | null = null;
       if (!clientTxHash && isBlockchainReady()) {
         try {
-          const r = await revokeCredentialOnChain(credential.credentialHash);
+          // Server can only sign as DEPLOYER; pass the acting address for auth check.
+          const r = await revokeCredentialOnChain(revokedBy, credential.credentialHash);
           log.info({ txHash: r.txHash, blockNumber: r.blockNumber }, "credential revoked on-chain (server)");
           chainTx = r.txHash;
           chainBlock = r.blockNumber;
@@ -432,7 +435,7 @@ export function registerCredentialRoutes(app: Express) {
       const credential = await storage.getCredentialById(id);
       if (!credential) return res.status(404).json({ message: "Credential not found" });
 
-      const isIssuer = credential.issuerAddress.toLowerCase() === renewedBy;
+      const isIssuer = credential.issuerAddress === renewedBy;
       const isRoot = req.auth!.role === "root";
       if (!isIssuer && !isRoot) {
         return res
