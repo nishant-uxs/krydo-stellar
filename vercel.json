@@ -21,8 +21,7 @@
   "functions": {
     "api/index.ts": {
       "maxDuration": 30,
-      "memory": 1024,
-      "excludeFiles": "{client/**,docs/**,contracts/target/**,node_modules/@creit.tech/stellar-wallets-kit/**,node_modules/@reown/**,node_modules/@trezor/**,node_modules/@walletconnect/**}"
+      "memory": 1024
     }
   }
 }

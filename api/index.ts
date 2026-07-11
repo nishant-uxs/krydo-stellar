@@ -1,5 +1,7 @@
 import type { VercelRequest, VercelResponse } from "@vercel/node";
-import type { Express, Request, Response } from "express";
+import type { Request, Response } from "express";
+import type { Express } from "express";
+import { createApp } from "../server/createApp";
 
 let app: Express | null = null;
 let initError: string | null = null;
@@ -29,9 +31,6 @@ function restoreOriginalUrl(req: VercelRequest): void {
 /**
  * Vercel serverless entrypoint. Serves API routes, auth, health probes.
  * Static SPA assets are served by Vercel CDN from dist/public (see vercel.json).
- *
- * createApp is lazy-imported so config/Firebase failures become JSON 500s
- * instead of opaque FUNCTION_INVOCATION_FAILED.
  */
 export default async function handler(req: VercelRequest, res: VercelResponse) {
   try {
@@ -44,7 +43,6 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
     if (!app) {
       try {
-        const { createApp } = await import("../server/createApp");
         const bundle = await createApp({ serveStaticFiles: false });
         app = bundle.app;
       } catch (err: any) {
