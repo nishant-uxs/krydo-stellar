@@ -47,6 +47,7 @@ import { shortenAddress } from "@/lib/wallet";
 import type { Credential } from "@shared/schema";
 import { claimTypeLabels, proofTypeLabels, type ClaimType, type ProofType } from "@shared/schema";
 import { motion, AnimatePresence } from "framer-motion";
+import { PageShell, PageHeader } from "@/components/page-shell";
 
 const verifySchema = z.object({
   credentialHash: z.string().min(1, "Credential hash or ID is required"),
@@ -433,33 +434,26 @@ export default function VerifyPage() {
   }, [autoProofId]);
 
   return (
-    <div className="p-6 md:p-8 max-w-2xl mx-auto space-y-8 relative">
-      <div className="absolute top-0 right-10 w-72 h-72 rounded-full bg-primary/5 blur-[120px] pointer-events-none" />
-
-      {/* Header */}
-      <div>
-        <Badge variant="outline" className="text-[10px] uppercase font-mono tracking-widest text-primary bg-primary/5 py-1 px-2">
-          Public Verifier
-        </Badge>
-        <h1 className="font-serif text-3xl font-extrabold tracking-tight mt-2 flex items-center gap-2" data-testid="text-verify-title">
-          {autoProofId ? "Proof Verification" : "Verify Claims"}
-          <Eye className="w-6 h-6 text-primary" />
-        </h1>
-        <p className="text-sm text-muted-foreground mt-1 font-sans">
-          {autoProofId
+    <PageShell maxWidth="2xl">
+      <PageHeader
+        eyebrow="Public Verifier"
+        title={autoProofId ? "Proof Verification" : "Verify Claims"}
+        description={
+          autoProofId
             ? "Live cryptographic + on-chain verification of the proof encoded in the QR code you scanned."
-            : "Verify credential signatures or zero-knowledge mathematical proofs instantly."}
-        </p>
-      </div>
+            : "Verify credential signatures or zero-knowledge mathematical proofs instantly."
+        }
+        titleTestId="text-verify-title"
+      />
 
-      <Tabs defaultValue={autoProofId ? "zk-proof" : "credential"}>
-        <TabsList className="w-full h-12 bg-muted/40 border rounded-xl p-1">
-          <TabsTrigger value="credential" className="flex-1 rounded-lg text-sm font-semibold h-full" data-testid="tab-verify-credential">
-            <Eye className="w-4 h-4 mr-2" />
+      <Tabs defaultValue={autoProofId ? "zk-proof" : "credential"} className="min-w-0">
+        <TabsList className="w-full h-auto min-h-12 bg-muted/40 border rounded-xl p-1 flex flex-col sm:flex-row gap-1">
+          <TabsTrigger value="credential" className="flex-1 rounded-lg text-xs sm:text-sm font-semibold h-10 sm:h-full" data-testid="tab-verify-credential">
+            <Eye className="w-4 h-4 mr-2 shrink-0" />
             Plaintext Credential
           </TabsTrigger>
-          <TabsTrigger value="zk-proof" className="flex-1 rounded-lg text-sm font-semibold h-full" data-testid="tab-verify-zk">
-            <Fingerprint className="w-4 h-4 mr-2" />
+          <TabsTrigger value="zk-proof" className="flex-1 rounded-lg text-xs sm:text-sm font-semibold h-10 sm:h-full" data-testid="tab-verify-zk">
+            <Fingerprint className="w-4 h-4 mr-2 shrink-0" />
             Zero-Knowledge Proof
           </TabsTrigger>
         </TabsList>
@@ -610,6 +604,6 @@ export default function VerifyPage() {
           </AnimatePresence>
         </TabsContent>
       </Tabs>
-    </div>
+    </PageShell>
   );
 }

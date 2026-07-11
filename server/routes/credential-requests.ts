@@ -3,12 +3,12 @@ import crypto from "crypto";
 import { z } from "zod";
 import { storage } from "../storage";
 import { insertCredentialRequestSchema } from "@shared/schema";
+import { validateIssuerClaimInputs } from "@shared/claim-consistency";
 import {
-  anchorCredentialRequestOnChain,
-  issueCredentialOnChain,
-  isBlockchainReady,
   waitForClientTx,
+  isBlockchainReady,
 } from "../blockchain";
+import { AUDIT_ID, CREDENTIALS_ID } from "@shared/contracts";
 import { requireAuth, requireRole } from "../auth/jwt";
 import { sensitiveLimiter } from "../middleware/security";
 import { readPageOpts, sendPage } from "../middleware/pagination";
@@ -43,22 +43,12 @@ export function registerCredentialRequestRoutes(app: Express) {
       let onChainTxHash: string | null = null;
       let onChainBlockNumber: string | null = null;
 
-      // Legacy server-signed path: only when client hasn't opted into
-      // self-signing the request anchor.
-      if (!clientWillAnchor && isBlockchainReady()) {
-        try {
-          const r = await anchorCredentialRequestOnChain(
-            request.id,
-            data.requesterAddress,
-            data.claimType,
-            "request_created",
-          );
-          onChainTxHash = r.txHash;
-          onChainBlockNumber = r.blockNumber;
-          log.info({ txHash: r.txHash, blockNumber: r.blockNumber }, "credential request anchored on-chain (server)");
-        } catch (err: any) {
-          log.error({ err: err.message }, "credential request on-chain anchoring failed");
-        }
+      // Wallet must sign the audit anchor (clientWillAnchor + POST .../anchor).
+      if (AUDIT_ID && !clientWillAnchor) {
+        return res.status(400).json({
+          message:
+            "clientWillAnchor required. Confirm in the app popup, then sign the request anchor with your Stellar wallet.",
+        });
       }
 
       await storage.createTransaction({
@@ -307,8 +297,7 @@ export function registerCredentialRequestRoutes(app: Express) {
 
         if (status === "rejected") {
           const updated = await storage.updateCredentialRequestStatus(id, "rejected", responseMessage);
-          // Rejection anchor: only sign server-side if client hasn't already
-          // provided a signed tx hash (Full-SSI mode sends its own tx here).
+          // Rejection is off-chain unless the client already wallet-signed an audit anchor.
           if (onChainTxHash) {
             await storage.updateCredentialRequestOnChainTxHash(id, onChainTxHash);
             await storage.createTransaction({
@@ -319,30 +308,6 @@ export function registerCredentialRequestRoutes(app: Express) {
               data: { requestId: id, claimType: request.claimType, onChain: true, clientSigned: true },
               blockNumber: "0",
             });
-          } else if (isBlockchainReady()) {
-            try {
-              const rejectRes = await anchorCredentialRequestOnChain(
-                id,
-                request.requesterAddress,
-                request.claimType,
-                "rejected",
-              );
-              log.info(
-                { txHash: rejectRes.txHash, blockNumber: rejectRes.blockNumber },
-                "request rejection anchored on-chain",
-              );
-              await storage.updateCredentialRequestOnChainTxHash(id, rejectRes.txHash);
-              await storage.createTransaction({
-                txHash: rejectRes.txHash,
-                action: "credential_request_rejected_onchain",
-                fromAddress: respondedBy,
-                toAddress: request.requesterAddress,
-                data: { requestId: id, claimType: request.claimType, onChain: true },
-                blockNumber: rejectRes.blockNumber,
-              });
-            } catch (err: any) {
-              log.error({ err: err.message }, "request rejection on-chain anchoring failed");
-            }
           }
           return res.json(updated);
         }
@@ -395,6 +360,15 @@ export function registerCredentialRequestRoutes(app: Express) {
           return res.status(400).json({ message: "claimValue is required to approve and issue" });
         }
 
+        const consistencyErr = validateIssuerClaimInputs({
+          claimType: request.claimType,
+          claimSummary: claimSummary.trim(),
+          claimValue: claimValue.trim(),
+        });
+        if (consistencyErr) {
+          return res.status(400).json({ message: consistencyErr });
+        }
+
         let expiresAtDate: Date | undefined;
         if (rawExpiresAt && typeof rawExpiresAt === "string") {
           const parsed = new Date(rawExpiresAt);
@@ -439,53 +413,16 @@ export function registerCredentialRequestRoutes(app: Express) {
           });
         }
 
-        // Legacy single-shot flow: server signs on behalf of issuer.
-        if (onChainTxHash) {
-          await storage.updateTransactionTxHash(result.tx.id, onChainTxHash);
-        } else if (isBlockchainReady()) {
-          try {
-            const issueRes = await issueCredentialOnChain(
-              req.auth!.sub,
-              result.credential.credentialHash,
-              request.requesterAddress,
-              request.claimType,
-              claimSummary.trim(),
-            );
-            await storage.updateTransactionOnChain(result.tx.id, issueRes.txHash, issueRes.blockNumber);
-          } catch (err: any) {
-            log.error({ err: err.message }, "on-chain issueCredential failed");
-          }
+        // Single-shot approve+issue requires a wallet-signed issue tx when contracts are live.
+        if (CREDENTIALS_ID && !onChainTxHash) {
+          return res.status(400).json({
+            message:
+              "onChainTxHash required (or use prepareOnly). Confirm in the app popup, then sign issue_credential with your Stellar wallet.",
+          });
         }
 
-        if (isBlockchainReady()) {
-          try {
-            const approveRes = await anchorCredentialRequestOnChain(
-              id,
-              request.requesterAddress,
-              request.claimType,
-              "approved_and_issued",
-            );
-            log.info(
-              { txHash: approveRes.txHash, blockNumber: approveRes.blockNumber },
-              "request approval anchored on-chain",
-            );
-            await storage.updateCredentialRequestOnChainTxHash(id, approveRes.txHash);
-            await storage.createTransaction({
-              txHash: approveRes.txHash,
-              action: "credential_request_approved_onchain",
-              fromAddress: respondedBy,
-              toAddress: request.requesterAddress,
-              data: {
-                requestId: id,
-                claimType: request.claimType,
-                credentialId: result.credential.id,
-                onChain: true,
-              },
-              blockNumber: approveRes.blockNumber,
-            });
-          } catch (err: any) {
-            log.error({ err: err.message }, "request approval on-chain anchoring failed");
-          }
+        if (onChainTxHash) {
+          await storage.updateTransactionTxHash(result.tx.id, onChainTxHash);
         }
 
         const updated = await storage.updateCredentialRequestStatus(

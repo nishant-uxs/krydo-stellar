@@ -29,10 +29,15 @@ export function WalletButton() {
       <Button
         onClick={connect}
         disabled={isConnecting}
+        size="sm"
+        className="rounded-full shrink-0"
         data-testid="button-connect-wallet"
       >
-        <SiStellar className="w-4 h-4 mr-2" />
-        {isConnecting ? "Signing in..." : "Connect Wallet"}
+        <SiStellar className="w-4 h-4 sm:mr-2" />
+        <span className="hidden sm:inline">
+          {isConnecting ? "Signing in..." : "Connect Wallet"}
+        </span>
+        <span className="sm:hidden">{isConnecting ? "…" : "Connect"}</span>
       </Button>
     );
   }
@@ -46,11 +51,21 @@ export function WalletButton() {
   return (
     <DropdownMenu>
       <DropdownMenuTrigger asChild>
-        <Button variant="outline" data-testid="button-wallet-menu">
-          <div className="flex items-center gap-2">
-            <SiStellar className="w-3 h-3 text-primary" />
-            <span className="font-mono text-xs">{shortenAddress(address!)}</span>
-            <Badge variant="secondary" className={`text-[10px] px-1.5 py-0 no-default-active-elevate ${roleColors[role || "user"]}`}>
+        <Button
+          variant="outline"
+          size="sm"
+          className="rounded-full max-w-[min(100%,11rem)] sm:max-w-none"
+          data-testid="button-wallet-menu"
+        >
+          <div className="flex items-center gap-1.5 sm:gap-2 min-w-0">
+            <SiStellar className="w-3 h-3 text-primary shrink-0" />
+            <span className="font-mono text-[10px] sm:text-xs truncate">
+              {shortenAddress(address!)}
+            </span>
+            <Badge
+              variant="secondary"
+              className={`hidden sm:inline-flex text-[10px] px-1.5 py-0 no-default-active-elevate shrink-0 ${roleColors[role || "user"]}`}
+            >
               {role}
             </Badge>
           </div>

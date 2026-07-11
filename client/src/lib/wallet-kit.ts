@@ -1,5 +1,5 @@
 /**
- * Stellar Wallets Kit — multi-wallet layer (RainbowKit-style for Stellar).
+ * Stellar Wallets Kit — multi-wallet connect modal for Freighter, xBull, Lobstr, etc.
  *
  * One modal lists Freighter, xBull, Lobstr, Hana, etc. Auth still goes through
  * our SIWS (SEP-53 signMessage → JWT) flow; contract txs use kit.signTransaction.

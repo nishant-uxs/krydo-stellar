@@ -5,6 +5,7 @@ import { proofTypes, OFF_CHAIN_TX_HASH } from "@shared/schema";
 import {
   verifyCredentialOnChain,
   isBlockchainReady,
+  isChainReadable,
 } from "../blockchain";
 import { requireAuth } from "../auth/jwt";
 import { sensitiveLimiter } from "../middleware/security";
@@ -218,10 +219,10 @@ export function registerZkRoutes(app: Express) {
           .json({ message: "Only the prover can anchor this ZK proof" });
       }
 
-      if (!isBlockchainReady()) {
+      if (!isChainReadable()) {
         return res
           .status(503)
-          .json({ message: "Blockchain provider not configured on this server" });
+          .json({ message: "Soroban RPC not configured on this server" });
       }
 
       // Verify the client-signed tx actually landed on Stellar. We reuse

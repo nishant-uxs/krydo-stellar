@@ -5,13 +5,12 @@ import {
   getDeployment,
   isBlockchainReady,
   isIssuerOnChain,
-  anchorRoleAssignmentOnChain,
 } from "../blockchain";
 import { stellarAddressSchema, type WalletRole } from "@shared/schema";
-import { DEPLOYMENT } from "@shared/contracts";
+import { DEPLOYMENT, AUDIT_ID } from "@shared/contracts";
 import { verifySep53Message } from "@shared/sep53";
 import { issueNonce, consumeNonce } from "./nonce-store";
-import { signAuthToken } from "./jwt";
+import { signAuthToken, requireAuth } from "./jwt";
 import { sensitiveLimiter } from "../middleware/security";
 import { childLogger } from "../logger";
 
@@ -107,43 +106,63 @@ export function registerAuthRoutes(app: Express) {
       const previous = await storage.getWallet(address);
       const wallet = await storage.connectWallet(address, role, label);
 
-      // Role-assignment anchor on Stellar: fire-and-forget. The user's
-      // signature has already been verified; the anchor is a provenance record,
-      // not a correctness gate. Skip when the wallet already carries the same
-      // role to avoid burning fees on repeat sign-ins.
+      // Client must wallet-sign the role audit anchor (popup → Freighter/etc).
+      // Server never signs this with DEPLOYER_SECRET.
       const roleChanged = !previous || previous.role !== role;
       const neverAnchored = !previous || !previous.onChainTxHash;
-      const shouldAnchor = isBlockchainReady() && (roleChanged || neverAnchored);
-
-      if (shouldAnchor) {
-        void (async () => {
-          try {
-            const { txHash, blockNumber } = await anchorRoleAssignmentOnChain(
-              address,
-              role,
-              label,
-            );
-            await storage.updateWalletOnChainTxHash(address, txHash);
-            await storage.createTransaction({
-              txHash,
-              action: "role_assigned_onchain",
-              fromAddress: address,
-              data: { role, label, onChain: true },
-              blockNumber,
-            });
-          } catch (err: any) {
-            log.error({ err: err.message, address }, "role anchor failed");
-          }
-        })();
-      }
+      const needsRoleAnchor = !!(AUDIT_ID && (roleChanged || neverAnchored));
 
       const token = signAuthToken({ sub: address, role });
-      res.json({ token, wallet });
+      res.json({ token, wallet, needsRoleAnchor });
     } catch (err: any) {
       if (err instanceof z.ZodError) {
         return res.status(400).json({ message: err.issues[0].message });
       }
       res.status(401).json({ message: err.message || "Authentication failed" });
+    }
+  });
+
+  /** POST /api/auth/role-anchor — record a wallet-signed role audit tx. */
+  app.post("/api/auth/role-anchor", requireAuth, sensitiveLimiter, async (req: Request, res: Response) => {
+    try {
+      if (!req.auth) return res.status(401).json({ message: "Not authenticated" });
+      const schema = z.object({
+        txHash: z.string().regex(/^[0-9a-f]{64}$/i, "Invalid Stellar tx hash"),
+      });
+      const { txHash } = schema.parse(req.body);
+      const address = req.auth.sub;
+
+      const { waitForClientTx } = await import("../blockchain");
+      const result = await waitForClientTx(txHash, { timeoutMs: 45_000 });
+      if (result.status === "unknown") {
+        return res.status(422).json({
+          message: "Role-anchor tx not found on Stellar. Retry signing on Testnet.",
+        });
+      }
+      if (result.status === "reverted") {
+        return res.status(422).json({ message: "Role-anchor tx reverted on-chain." });
+      }
+      if (result.status !== "confirmed") {
+        return res.status(422).json({ message: "Role-anchor tx still pending on Stellar. Retry shortly." });
+      }
+
+      await storage.updateWalletOnChainTxHash(address, txHash);
+      await storage.createTransaction({
+        txHash,
+        action: "role_assigned_onchain",
+        fromAddress: address,
+        data: { role: req.auth.role, onChain: true, walletSigned: true },
+        blockNumber: result.blockNumber,
+      });
+
+      const wallet = await storage.getWallet(address);
+      res.json({ success: true, wallet, txHash });
+    } catch (err: any) {
+      if (err instanceof z.ZodError) {
+        return res.status(400).json({ message: err.issues[0].message });
+      }
+      log.error({ err: err.message }, "role-anchor failed");
+      res.status(500).json({ message: err.message });
     }
   });
 

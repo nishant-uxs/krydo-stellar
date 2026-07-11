@@ -62,16 +62,11 @@ export async function initBlockchain(): Promise<boolean> {
   const rpcUrl = process.env.SOROBAN_RPC_URL || SOROBAN_RPC_URL;
 
   // Always expose deployment metadata (deployer G..., contract ids, network)
-  // so SIWS can assign root/issuer roles even when the server cannot sign
-  // (missing DEPLOYER_SECRET). Signing still requires the secret below.
+  // so SIWS can assign root/issuer roles even when the server cannot sign.
   if (AUTHORITY_ID && CREDENTIALS_ID && DEPLOYMENT.deployer) {
     deployment = DEPLOYMENT;
   }
 
-  if (!secret) {
-    console.warn("DEPLOYER_SECRET not configured. Running in off-chain mode.");
-    return false;
-  }
   if (!AUTHORITY_ID || !CREDENTIALS_ID) {
     console.warn("Deployment metadata is missing contract ids. Off-chain mode.");
     return false;
@@ -84,6 +79,14 @@ export async function initBlockchain(): Promise<boolean> {
   deployment = DEPLOYMENT;
   // allowHttp only matters for local/standalone http endpoints.
   server = new rpc.Server(rpcUrl, { allowHttp: rpcUrl.startsWith("http://") });
+
+  if (!secret) {
+    console.warn("DEPLOYER_SECRET not configured. Chain reads enabled; signing disabled.");
+    console.log(`Soroban RPC ready (read-only). Network: ${deployment.network}`);
+    console.log(`Authority contract: ${AUTHORITY_ID}`);
+    return false;
+  }
+
   sourceKeypair = Keypair.fromSecret(secret);
 
   console.log(`Soroban initialized. Root: ${sourceKeypair.publicKey()}`);
@@ -94,11 +97,21 @@ export async function initBlockchain(): Promise<boolean> {
   return true;
 }
 
+/** RPC + contracts available for simulate/read (signing may still be off). */
+export function isChainReadable(): boolean {
+  return !!server && !!AUTHORITY_ID && !!DEPLOYMENT.deployer;
+}
+
 export function isBlockchainReady(): boolean {
-  return !!server && !!sourceKeypair && !!AUTHORITY_ID && !!CREDENTIALS_ID;
+  return isChainReadable() && !!sourceKeypair && !!CREDENTIALS_ID;
 }
 
 // ---------- low-level helpers ----------
+
+function requireServer(): rpc.Server {
+  if (!server) throw new Error("Soroban RPC not initialized");
+  return server;
+}
 
 function requireReady(): { server: rpc.Server; source: Keypair } {
   if (!server || !sourceKeypair) throw new Error("Blockchain not initialized");
@@ -158,8 +171,12 @@ async function simulateRead<T>(
   method: string,
   args: xdr.ScVal[],
 ): Promise<T> {
-  const { server, source } = requireReady();
-  const account = await server.getAccount(source.publicKey());
+  const srv = requireServer();
+  // Prefer deployer secret account; otherwise use the known funded deployer G...
+  // so reads work without DEPLOYER_SECRET (Vercel read-only).
+  const sourceAddress = sourceKeypair?.publicKey() ?? DEPLOYMENT.deployer;
+  if (!sourceAddress) throw new Error("No source account for simulation");
+  const account = await srv.getAccount(sourceAddress);
   const contract = new Contract(contractId);
   const tx = new TransactionBuilder(account, {
     fee: BASE_FEE,
@@ -169,7 +186,7 @@ async function simulateRead<T>(
     .setTimeout(30)
     .build();
 
-  const sim = await server.simulateTransaction(tx);
+  const sim = await srv.simulateTransaction(tx);
   if (rpc.Api.isSimulationError(sim)) {
     throw new Error(`Simulation error: ${sim.error}`);
   }
@@ -213,8 +230,65 @@ export async function revokeIssuerOnChain(address: string): Promise<OnChainResul
 }
 
 export async function isIssuerOnChain(address: string): Promise<boolean> {
-  if (!isBlockchainReady()) return false;
+  if (!isChainReadable()) return false;
   return simulateRead<boolean>(AUTHORITY_ID, "is_issuer", [addrArg(address)]);
+}
+
+export interface OnChainIssuer {
+  address: string;
+  active: boolean;
+  name: string;
+  /** Unix seconds from ledger timestamp. */
+  approvedAt: number;
+  revokedAt: number;
+}
+
+function coerceIssuerInfo(raw: unknown): {
+  active: boolean;
+  name: string;
+  approved_at: number;
+  revoked_at: number;
+} | null {
+  if (!raw || typeof raw !== "object") return null;
+  const o = raw as Record<string, unknown>;
+  const name = o.name ?? o.Name;
+  const active = o.active ?? o.Active;
+  const approved = o.approved_at ?? o.approvedAt ?? o.ApprovedAt;
+  const revoked = o.revoked_at ?? o.revokedAt ?? o.RevokedAt;
+  if (typeof name !== "string" && typeof name !== "object") return null;
+  return {
+    active: Boolean(active),
+    name: String(name),
+    approved_at: Number(approved ?? 0),
+    revoked_at: Number(revoked ?? 0),
+  };
+}
+
+/** Full whitelist from KrydoAuthority — source of truth for Manage Issuers. */
+export async function listIssuersFromChain(): Promise<OnChainIssuer[]> {
+  if (!isChainReadable()) return [];
+  const addressesRaw = await simulateRead<unknown>(AUTHORITY_ID, "get_issuers", []);
+  const addresses = Array.isArray(addressesRaw)
+    ? addressesRaw.map((a) => String(a))
+    : [];
+
+  const out: OnChainIssuer[] = [];
+  for (const address of addresses) {
+    if (!/^G[A-Z2-7]{55}$/.test(address)) continue;
+    const infoRaw = await simulateRead<unknown>(AUTHORITY_ID, "get_issuer_info", [
+      addrArg(address),
+    ]);
+    const info = coerceIssuerInfo(infoRaw);
+    if (!info) continue;
+    out.push({
+      address,
+      active: info.active,
+      name: info.name,
+      approvedAt: info.approved_at,
+      revokedAt: info.revoked_at,
+    });
+  }
+  return out;
 }
 
 // ---------- KrydoCredentials ----------
@@ -388,17 +462,17 @@ export async function waitForClientTx(
   | { status: "pending" }
   | { status: "unknown" }
 > {
-  const { server } = requireReady();
+  const srv = requireServer();
   const { timeoutMs = 45_000 } = opts;
 
   const deadline = Date.now() + timeoutMs;
-  let got = await server.getTransaction(txHash);
+  let got = await srv.getTransaction(txHash);
   while (
     got.status === rpc.Api.GetTransactionStatus.NOT_FOUND &&
     Date.now() < deadline
   ) {
     await sleep(1500);
-    got = await server.getTransaction(txHash);
+    got = await srv.getTransaction(txHash);
   }
 
   switch (got.status) {

@@ -10,8 +10,18 @@ import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Shield, Wallet, ArrowRight, AlertTriangle, Loader2 } from "lucide-react";
 
+export type TxConfirmAction =
+  | "add_issuer"
+  | "revoke_issuer"
+  | "issue_credential"
+  | "revoke_credential"
+  | "credential_request"
+  | "role_anchor"
+  | "zk_anchor"
+  | "renew_credential";
+
 export interface TxConfirmInfo {
-  action: "add_issuer" | "revoke_issuer" | "issue_credential" | "revoke_credential";
+  action: TxConfirmAction;
   title: string;
   description: string;
   details: { label: string; value: string; mono?: boolean }[];
@@ -26,11 +36,15 @@ interface TxConfirmDialogProps {
   isPending?: boolean;
 }
 
-const actionLabels: Record<TxConfirmInfo["action"], { label: string; color: string }> = {
+const actionLabels: Record<TxConfirmAction, { label: string; color: string }> = {
   add_issuer: { label: "Authorize Issuer", color: "bg-chart-3/15 text-chart-3" },
   revoke_issuer: { label: "Revoke Issuer", color: "bg-destructive/15 text-destructive" },
   issue_credential: { label: "Issue Credential", color: "bg-chart-1/15 text-chart-1" },
   revoke_credential: { label: "Revoke Credential", color: "bg-destructive/15 text-destructive" },
+  credential_request: { label: "Request Credential", color: "bg-chart-2/15 text-chart-2" },
+  role_anchor: { label: "Anchor Role", color: "bg-primary/15 text-primary" },
+  zk_anchor: { label: "Anchor ZK Proof", color: "bg-chart-5/15 text-chart-5" },
+  renew_credential: { label: "Renew Credential", color: "bg-chart-1/15 text-chart-1" },
 };
 
 export function TxConfirmDialog({ open, onOpenChange, info, onConfirm, isPending }: TxConfirmDialogProps) {
@@ -40,7 +54,7 @@ export function TxConfirmDialog({ open, onOpenChange, info, onConfirm, isPending
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="max-w-md">
+      <DialogContent className="max-w-[calc(100vw-1.5rem)] sm:max-w-md">
         <DialogHeader>
           <DialogTitle className="flex items-center gap-2">
             <Shield className="w-5 h-5 text-primary" />
@@ -94,7 +108,7 @@ export function TxConfirmDialog({ open, onOpenChange, info, onConfirm, isPending
             {isPending ? (
               <>
                 <Loader2 className="w-4 h-4 mr-2 animate-spin" />
-                Processing...
+                Waiting for wallet...
               </>
             ) : (
               <>

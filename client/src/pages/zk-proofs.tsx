@@ -45,6 +45,11 @@ import type { Credential, ZkProof } from "@shared/schema";
 import { proofTypeLabels, claimTypeLabels, type ProofType, type ClaimType } from "@shared/schema";
 import { motion } from "framer-motion";
 import { QrCodeCanvas } from "@/components/qr-code-canvas";
+import { TxConfirmDialog, type TxConfirmInfo } from "@/components/tx-confirm-dialog";
+import { anchorZkProofViaWallet } from "@/lib/contracts";
+import { NETWORK_LABEL } from "@/lib/stellar";
+import { AUDIT_ID } from "@shared/contracts";
+import { PageShell, PageHeader } from "@/components/page-shell";
 
 const fadeUp = {
   initial: { opacity: 0, y: 15 },
@@ -68,6 +73,9 @@ export default function ZkProofsPage() {
   const [copied, setCopied] = useState(false);
   const [selectedFields, setSelectedFields] = useState<string[]>([]);
   const [qrProofId, setQrProofId] = useState<string | null>(null);
+  const [confirmOpen, setConfirmOpen] = useState(false);
+  const [confirmInfo, setConfirmInfo] = useState<TxConfirmInfo | null>(null);
+  const [zkStep, setZkStep] = useState("");
 
   const credentialFields = useMemo(() => {
     if (!selectedCredential) return {};
@@ -122,6 +130,7 @@ export default function ZkProofsPage() {
         credentialId: selectedCredential.id,
         proverAddress: address,
         proofType,
+        clientWillAnchor: !!AUDIT_ID,
       };
       if (proofType === "range_above" || proofType === "range_below") {
         if (!threshold) throw new Error("Threshold is required for range proofs");
@@ -158,23 +167,50 @@ export default function ZkProofsPage() {
         body.selectedFields = selectedFields;
       }
 
+      setZkStep("Generating proof...");
       const res = await apiRequest("POST", "/api/zk/generate", body);
-      return await res.json();
+      const proof = await res.json();
+
+      if (AUDIT_ID) {
+        setZkStep("Waiting for wallet approval...");
+        try {
+          const tx = await anchorZkProofViaWallet(
+            proof.id,
+            address,
+            proof.credentialHash || selectedCredential.credentialHash,
+            proof.commitment,
+          );
+          setZkStep("Recording anchor on Stellar...");
+          await apiRequest("POST", `/api/zk/${proof.id}/anchor`, { txHash: tx.txHash });
+          return { ...proof, onChainTxHash: tx.txHash };
+        } catch (err: any) {
+          if (err?.code === 4001 || err?.code === "ACTION_REJECTED") {
+            throw new Error("Wallet signing cancelled. Proof was generated off-chain only.");
+          }
+          throw err;
+        }
+      }
+
+      return proof;
     },
     onSuccess: (data) => {
+      setZkStep("");
       setGeneratedProof(data);
       setProofDialogOpen(true);
       queryClient.invalidateQueries({ queryKey: ["/api/zk/proofs"] });
       queryClient.invalidateQueries({ queryKey: ["/api/transactions"] });
       queryClient.invalidateQueries({ queryKey: ["/api/stats"] });
       toast({
-        title: "ZK Proof Generated",
+        title: data.onChainTxHash ? "ZK Proof Anchored" : "ZK Proof Generated",
         description: data.verified
-          ? "Proof verified successfully."
+          ? data.onChainTxHash
+            ? "Proof verified and anchored on Stellar."
+            : "Proof verified successfully."
           : "Proof generated but claim does NOT satisfy the condition.",
       });
     },
     onError: (error: Error) => {
+      setZkStep("");
       toast({ title: "Failed to generate proof", description: error.message, variant: "destructive" });
     },
   });
@@ -186,29 +222,18 @@ export default function ZkProofsPage() {
   };
 
   return (
-    <div className="p-6 md:p-8 max-w-4xl mx-auto space-y-8 relative">
-      <div className="absolute top-0 right-10 w-72 h-72 rounded-full bg-primary/5 blur-[120px] pointer-events-none" />
+    <PageShell>
+      <PageHeader
+        eyebrow="Zero-Knowledge Engine"
+        title="Zero-Knowledge Proofs"
+        description="Prove facts about your credentials mathematically without revealing any sensitive underlying data."
+        titleTestId="text-zk-title"
+      />
 
-      {/* Header */}
-      <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 pb-6 border-b">
-        <div>
-          <Badge variant="outline" className="text-[10px] uppercase font-mono tracking-widest text-primary bg-primary/5 py-1 px-2">
-            Zero-Knowledge Engine
-          </Badge>
-          <h1 className="font-serif text-3xl font-extrabold tracking-tight mt-2 flex items-center gap-2" data-testid="text-zk-title">
-            Zero-Knowledge Proofs
-            <Fingerprint className="w-6 h-6 text-primary" />
-          </h1>
-          <p className="text-sm text-muted-foreground mt-1 font-sans">
-            Prove facts about your credentials mathematically without revealing any sensitive underlying data.
-          </p>
-        </div>
-      </div>
-
-      <div className="grid grid-cols-1 lg:grid-cols-12 gap-8 items-start">
+      <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 lg:gap-8 items-start min-w-0">
         
         {/* LEFT COLUMN: FORM GENERATION */}
-        <div className="lg:col-span-7 space-y-6">
+        <div className="lg:col-span-7 space-y-6 min-w-0">
           <Card className="border-border/80 bg-card/45 backdrop-blur-sm shadow-xl rounded-2xl relative overflow-hidden">
             <div className="absolute top-0 right-0 w-32 h-32 bg-primary/5 rounded-full blur-3xl pointer-events-none" />
             
@@ -451,7 +476,35 @@ export default function ZkProofsPage() {
 
               {/* Submit Button */}
               <Button
-                onClick={() => generateMutation.mutate()}
+                onClick={() => {
+                  if (!selectedCredential || !address) return;
+                  if (AUDIT_ID) {
+                    setConfirmInfo({
+                      action: "zk_anchor",
+                      title: "Generate & Anchor ZK Proof",
+                      description:
+                        "Proof math runs off-chain first. Then your wallet signs an on-chain audit anchor — no private claim data is revealed.",
+                      details: [
+                        {
+                          label: "Credential",
+                          value:
+                            claimTypeLabels[selectedCredential.claimType as ClaimType] ||
+                            selectedCredential.claimType,
+                        },
+                        {
+                          label: "Proof type",
+                          value: proofTypeLabels[proofType] || proofType,
+                        },
+                        { label: "Your wallet", value: address, mono: true },
+                        { label: "Contract", value: "KrydoAudit", mono: true },
+                        { label: "Network", value: NETWORK_LABEL },
+                      ],
+                    });
+                    setConfirmOpen(true);
+                    return;
+                  }
+                  generateMutation.mutate();
+                }}
                 disabled={!selectedCredential || generateMutation.isPending}
                 className="w-full h-11 text-sm font-semibold rounded-xl bg-primary hover:bg-primary/95 text-primary-foreground shadow-lg hover:shadow-primary/10 transition-all duration-300"
                 data-testid="button-generate-proof"
@@ -459,12 +512,12 @@ export default function ZkProofsPage() {
                 {generateMutation.isPending ? (
                   <>
                     <Loader2 className="w-4 h-4 mr-2 animate-spin" />
-                    Executing ZK Proof Math...
+                    {zkStep || "Executing ZK Proof Math..."}
                   </>
                 ) : (
                   <>
                     <Fingerprint className="w-4.5 h-4.5 mr-2" />
-                    Generate Proof
+                    {AUDIT_ID ? "Generate & Sign On-Chain" : "Generate Proof"}
                   </>
                 )}
               </Button>
@@ -731,6 +784,17 @@ export default function ZkProofsPage() {
           )}
         </DialogContent>
       </Dialog>
-    </div>
+
+      <TxConfirmDialog
+        open={confirmOpen}
+        onOpenChange={setConfirmOpen}
+        info={confirmInfo}
+        isPending={generateMutation.isPending}
+        onConfirm={() => {
+          setConfirmOpen(false);
+          generateMutation.mutate();
+        }}
+      />
+    </PageShell>
   );
 }

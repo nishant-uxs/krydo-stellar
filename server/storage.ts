@@ -41,6 +41,11 @@ function normAddr(addr: string | null | undefined): string {
   return (addr ?? "").trim();
 }
 
+/** True for a Stellar account StrKey (`G` + 55 base32). */
+export function isStellarAccount(addr: string | null | undefined): boolean {
+  return /^G[A-Z2-7]{55}$/.test((addr ?? "").trim());
+}
+
 /** Convert Firestore Timestamp / Date / ISO string to JS Date (or null). */
 function toDate(value: any): Date | null {
   if (value === null || value === undefined) return null;
@@ -203,6 +208,20 @@ export interface IStorage {
   createIssuer(issuer: InsertIssuer, onChainTxHash?: string | null): Promise<{ issuer: Issuer; tx: Transaction }>;
   reactivateIssuer(id: string, name: string, description: string, approvedBy: string, onChainTxHash?: string | null, category?: string): Promise<{ issuer: Issuer; tx: Transaction }>;
   revokeIssuer(id: string, revokedBy: string, onChainTxHash?: string | null): Promise<{ issuer: Issuer; tx: Transaction }>;
+  /**
+   * Upsert Firestore issuer row from KrydoAuthority state. Used when listing
+   * issuers so the UI matches on-chain whitelist (and drops Eth leftovers).
+   */
+  upsertIssuerFromChain(params: {
+    walletAddress: string;
+    name: string;
+    active: boolean;
+    approvedAt: Date;
+    revokedAt: Date | null;
+    approvedBy: string;
+  }): Promise<Issuer>;
+  /** Soft-delete / hard-delete issuers whose wallet is not a Stellar G... address. */
+  deleteLegacyNonStellarIssuers(): Promise<number>;
 
   getCredentials(holderAddress: string): Promise<Credential[]>;
   getCredentialsByIssuer(issuerAddress: string): Promise<Credential[]>;
@@ -332,20 +351,81 @@ export class FirestoreStorage implements IStorage {
 
   async getIssuers(): Promise<Issuer[]> {
     const snap = await collections.issuers.orderBy("approvedAt", "desc").get();
-    return snap.docs.map(d => issuerFromDoc(d.id, d.data()));
+    return snap.docs
+      .map(d => issuerFromDoc(d.id, d.data()))
+      .filter(i => isStellarAccount(i.walletAddress));
   }
 
   async getIssuer(id: string): Promise<Issuer | undefined> {
     const doc = await collections.issuers.doc(id).get();
     if (!doc.exists) return undefined;
-    return issuerFromDoc(doc.id, doc.data());
+    const issuer = issuerFromDoc(doc.id, doc.data());
+    return isStellarAccount(issuer.walletAddress) ? issuer : undefined;
   }
 
   async getIssuerByAddress(address: string): Promise<Issuer | undefined> {
+    if (!isStellarAccount(address)) return undefined;
     const snap = await collections.issuers.where("walletAddress", "==", normAddr(address)).limit(1).get();
     if (snap.empty) return undefined;
     const d = snap.docs[0];
     return issuerFromDoc(d.id, d.data());
+  }
+
+  async upsertIssuerFromChain(params: {
+    walletAddress: string;
+    name: string;
+    active: boolean;
+    approvedAt: Date;
+    revokedAt: Date | null;
+    approvedBy: string;
+  }): Promise<Issuer> {
+    const walletAddress = normAddr(params.walletAddress);
+    if (!isStellarAccount(walletAddress)) {
+      throw new Error("upsertIssuerFromChain requires a Stellar G... address");
+    }
+    const existing = await this.getIssuerByAddress(walletAddress);
+    if (existing) {
+      await collections.issuers.doc(existing.id).update({
+        name: params.name || existing.name,
+        active: params.active,
+        approvedAt: params.approvedAt,
+        revokedAt: params.revokedAt,
+      });
+      const doc = await collections.issuers.doc(existing.id).get();
+      return issuerFromDoc(doc.id, doc.data());
+    }
+    const id = newId();
+    const payload = {
+      id,
+      walletAddress,
+      name: params.name || "Issuer",
+      description: null,
+      category: "general",
+      active: params.active,
+      approvedBy: normAddr(params.approvedBy) || walletAddress,
+      approvedAt: params.approvedAt,
+      revokedAt: params.revokedAt,
+    };
+    await collections.issuers.doc(id).set(payload);
+    if (params.active) {
+      await collections.wallets.doc(walletAddress).set(
+        { role: "issuer", label: params.name || "Issuer", address: walletAddress },
+        { merge: true },
+      );
+    }
+    return issuerFromDoc(id, payload);
+  }
+
+  async deleteLegacyNonStellarIssuers(): Promise<number> {
+    const snap = await collections.issuers.get();
+    let deleted = 0;
+    for (const doc of snap.docs) {
+      const addr = String(doc.data()?.walletAddress ?? "");
+      if (isStellarAccount(addr)) continue;
+      await doc.ref.delete();
+      deleted++;
+    }
+    return deleted;
   }
 
   async createIssuer(data: InsertIssuer, onChainTxHash?: string | null): Promise<{ issuer: Issuer; tx: Transaction }> {
@@ -460,7 +540,7 @@ export class FirestoreStorage implements IStorage {
     const snap = await collections.issuers.where("category", "==", category).get();
     return snap.docs
       .map(d => issuerFromDoc(d.id, d.data()))
-      .filter(i => i.active)
+      .filter(i => i.active && isStellarAccount(i.walletAddress))
       .sort((a, b) => b.approvedAt.getTime() - a.approvedAt.getTime());
   }
 
@@ -840,12 +920,16 @@ export class FirestoreStorage implements IStorage {
   // ----- paginated list implementations -----
 
   async listIssuersPaged(opts?: PageOpts): Promise<PageResult<Issuer>> {
-    return paginateQuery(
+    const page = await paginateQuery(
       collections.issuers.orderBy("approvedAt", "desc"),
       collections.issuers,
       opts,
       (id, data) => issuerFromDoc(id, data),
     );
+    return {
+      items: page.items.filter((i) => isStellarAccount(i.walletAddress)),
+      nextCursor: page.nextCursor,
+    };
   }
 
   async listCredentialsForHolderPaged(address: string, opts?: PageOpts): Promise<PageResult<Credential>> {

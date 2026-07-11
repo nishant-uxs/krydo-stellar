@@ -42,10 +42,17 @@ export function AppSidebar() {
   return (
     <Sidebar>
       <SidebarHeader className="p-4">
-        <div className="flex items-center gap-2">
-          <Shield className="w-5 h-5 text-primary" />
+        <Link
+          href="/dashboard"
+          className="flex items-center gap-2 rounded-lg outline-none transition-opacity hover:opacity-90 focus-visible:ring-2 focus-visible:ring-sidebar-ring"
+          data-testid="link-logo-home"
+        >
+          <Shield className="w-5 h-5 text-primary shrink-0" />
           <span className="font-serif font-bold text-lg tracking-tight">Krydo</span>
-        </div>
+        </Link>
+        <Badge variant="outline" className="mt-2 text-[9px] uppercase font-mono tracking-widest text-primary bg-primary/5 w-fit">
+          Stellar Network
+        </Badge>
       </SidebarHeader>
       <SidebarContent>
         <SidebarGroup>

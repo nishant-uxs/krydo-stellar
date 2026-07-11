@@ -24,6 +24,7 @@ import { isOffChainTx } from "@shared/schema";
 import { motion } from "framer-motion";
 import { explorerTxUrl, NETWORK_LABEL } from "@/lib/stellar";
 import { Link } from "wouter";
+import { PageShell, PageHeader } from "@/components/page-shell";
 
 const fadeUp = {
   initial: { opacity: 0, y: 15 },
@@ -81,57 +82,49 @@ export default function Dashboard() {
   };
 
   return (
-    <div className="p-6 md:p-8 max-w-6xl mx-auto space-y-8 relative">
-      
-      {/* Upper Subtle Glow Dot */}
-      <div className="absolute top-0 right-1/4 w-96 h-96 rounded-full bg-primary/5 blur-[120px] pointer-events-none" />
-
-      {/* HEADER SECTION WITH PREMIUM METRICS BADGE */}
-      <motion.div 
-        {...fadeUp}
-        className="flex flex-col md:flex-row md:items-center justify-between gap-4 pb-6 border-b"
-      >
-        <div>
-          <div className="flex items-center gap-2">
-            <Badge variant="outline" className="text-[10px] uppercase font-mono tracking-widest text-primary bg-primary/5 py-1 px-2">
-              KRYDO STELLAR IDENTITY
-            </Badge>
+    <PageShell maxWidth="6xl">
+      <PageHeader
+        eyebrow="KRYDO STELLAR IDENTITY"
+        title={roleTitles[role || "user"] || "Dashboard"}
+        description={roleDescriptions[role || "user"]}
+        titleTestId="text-dashboard-title"
+        actions={
+          <div className="flex flex-wrap items-center gap-2">
             {network?.blockchain && (
-              <Badge variant="secondary" className="text-[10px] bg-chart-3/10 text-chart-3 no-default-active-elevate font-sans border border-chart-3/20 flex items-center gap-1 shrink-0" data-testid="badge-network-status">
+              <Badge
+                variant="secondary"
+                className="text-[10px] bg-chart-3/10 text-chart-3 no-default-active-elevate font-sans border border-chart-3/20 flex items-center gap-1"
+                data-testid="badge-network-status"
+              >
                 <Link2 className="w-3 h-3" />
                 Stellar {NETWORK_LABEL}
               </Badge>
             )}
+            {onChainTxHash && (
+              <a
+                href={explorerTxUrl(onChainTxHash)}
+                target="_blank"
+                rel="noopener noreferrer"
+                data-testid="link-role-onchain"
+              >
+                <Badge
+                  variant="secondary"
+                  className="text-[11px] py-1.5 px-3 bg-primary/10 text-primary border border-primary/20 no-default-active-elevate font-medium cursor-pointer hover:bg-primary/15 transition-all duration-300 shadow-sm flex items-center gap-1.5 rounded-full"
+                >
+                  <Shield className="w-3.5 h-3.5" />
+                  <span className="hidden sm:inline">Authority Role On-Chain</span>
+                  <span className="sm:hidden">On-Chain</span>
+                  <ArrowUpRight className="w-3 h-3" />
+                </Badge>
+              </a>
+            )}
           </div>
-          <h1 className="font-serif text-3xl font-extrabold tracking-tight mt-2 text-foreground flex items-center gap-2" data-testid="text-dashboard-title">
-            {roleTitles[role || "user"]}
-            <Sparkles className="w-5 h-5 text-yellow-500/80 animate-pulse" />
-          </h1>
-          <p className="text-sm text-muted-foreground mt-1.5 font-sans max-w-2xl leading-relaxed">
-            {roleDescriptions[role || "user"]}
-          </p>
-        </div>
-
-        {onChainTxHash && (
-          <a
-            href={explorerTxUrl(onChainTxHash)}
-            target="_blank"
-            rel="noopener noreferrer"
-            data-testid="link-role-onchain"
-            className="self-start md:self-center shrink-0"
-          >
-            <Badge variant="secondary" className="text-[11px] py-1.5 px-3 bg-primary/10 text-primary border border-primary/20 no-default-active-elevate font-medium shrink-0 cursor-pointer hover:bg-primary/15 transition-all duration-300 shadow-sm flex items-center gap-1.5 rounded-full">
-              <Shield className="w-3.5 h-3.5" />
-              Authority Role On-Chain
-              <ArrowUpRight className="w-3 h-3" />
-            </Badge>
-          </a>
-        )}
-      </motion.div>
+        }
+      />
 
       {/* METRICS GRID WITH MODERN GRADIENTS AND GLASSMORPHISM */}
       <motion.div
-        className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-5"
+        className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 sm:gap-5"
         initial="initial"
         animate="animate"
         variants={stagger}
@@ -295,8 +288,10 @@ export default function Dashboard() {
                               )}
                             </div>
                             {offChain ? (
-                              <span className="font-mono text-[10px] text-muted-foreground block truncate max-w-[250px]">
-                                {tx.txHash.slice(0, 24)}...
+                              <span className="text-[10px] text-muted-foreground block truncate max-w-[250px]">
+                                {tx.action.includes("zk")
+                                  ? "Local ZK event (anchor for on-chain hash)"
+                                  : "Local event"}
                               </span>
                             ) : (
                               <a
@@ -311,7 +306,11 @@ export default function Dashboard() {
                           </div>
                           <div className="text-right shrink-0 space-y-1">
                             <Badge variant="outline" className="text-[9px] font-mono border-border/80 text-muted-foreground py-0.5 px-1.5 rounded-md bg-muted/20">
-                              Ledger #{tx.blockNumber}
+                              {offChain
+                                ? "Off-chain"
+                                : tx.blockNumber && tx.blockNumber !== "0"
+                                  ? `Ledger #${tx.blockNumber}`
+                                  : "Ledger pending"}
                             </Badge>
                             <p className="text-[10px] text-muted-foreground">
                               {new Date(tx.timestamp).toLocaleDateString(undefined, { month: "short", day: "numeric" })}
@@ -400,6 +399,6 @@ export default function Dashboard() {
         </motion.div>
 
       </div>
-    </div>
+    </PageShell>
   );
 }

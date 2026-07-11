@@ -19,7 +19,7 @@ import {
 } from "react";
 import { apiRequest, queryClient } from "./queryClient";
 import { setAuthToken, getAuthToken } from "./auth-token";
-import { STELLAR_NETWORK, NETWORK_LABEL } from "./stellar";
+import { NETWORK_LABEL, STELLAR_NETWORK } from "./stellar";
 import {
   ensureWalletKit,
   rememberWalletId,
@@ -27,6 +27,8 @@ import {
   KitEventType,
 } from "./wallet-kit";
 import { useToast } from "@/hooks/use-toast";
+import { TxConfirmDialog, type TxConfirmInfo } from "@/components/tx-confirm-dialog";
+import { anchorRoleViaWallet } from "./contracts";
 
 const STORAGE_KEY = "krydo_wallet";
 
@@ -97,6 +99,14 @@ export function WalletProvider({ children }: { children: ReactNode }) {
   const [isConnecting, setIsConnecting] = useState(false);
   const [hasWallet, setHasWallet] = useState(true);
   const [walletId, setWalletId] = useState<string | null>(null);
+  const [roleConfirmOpen, setRoleConfirmOpen] = useState(false);
+  const [roleConfirmInfo, setRoleConfirmInfo] = useState<TxConfirmInfo | null>(null);
+  const [roleAnchorPending, setRoleAnchorPending] = useState(false);
+  const pendingRoleAnchor = useRef<{
+    address: string;
+    role: string;
+    label: string | null;
+  } | null>(null);
 
   const addressRef = useRef<string | null>(null);
   const signInInFlightFor = useRef<string | null>(null);
@@ -230,9 +240,10 @@ export function WalletProvider({ children }: { children: ReactNode }) {
           message,
           signature,
         });
-        const { token, wallet } = (await verifyRes.json()) as {
+        const { token, wallet, needsRoleAnchor } = (await verifyRes.json()) as {
           token: string;
           wallet: StoredWallet;
+          needsRoleAnchor?: boolean;
         };
 
         setAuthToken(token);
@@ -243,6 +254,31 @@ export function WalletProvider({ children }: { children: ReactNode }) {
         addressRef.current = wallet.address;
         localStorage.setItem(STORAGE_KEY, JSON.stringify(wallet));
         queryClient.invalidateQueries({ queryKey: ["/api"] });
+
+        if (needsRoleAnchor) {
+          pendingRoleAnchor.current = {
+            address: wallet.address,
+            role: wallet.role,
+            label: wallet.label,
+          };
+          setRoleConfirmInfo({
+            action: "role_anchor",
+            title: "Anchor Role On-Chain",
+            description:
+              "Record your Krydo role on Stellar so others can verify your authority. Your wallet will sign this transaction.",
+            details: [
+              { label: "Action", value: "Anchor role assignment" },
+              { label: "Wallet", value: wallet.address, mono: true },
+              { label: "Role", value: wallet.role },
+              ...(wallet.label
+                ? [{ label: "Label", value: wallet.label }]
+                : []),
+              { label: "Contract", value: "KrydoAudit", mono: true },
+              { label: "Network", value: NETWORK_LABEL },
+            ],
+          });
+          setRoleConfirmOpen(true);
+        }
       } catch (err) {
         const msg = errMessage(err);
         // eslint-disable-next-line no-console
@@ -302,6 +338,56 @@ export function WalletProvider({ children }: { children: ReactNode }) {
     queryClient.clear();
   }, [clearLocalSession]);
 
+  const confirmRoleAnchor = useCallback(async () => {
+    const pending = pendingRoleAnchor.current;
+    if (!pending) {
+      setRoleConfirmOpen(false);
+      return;
+    }
+    setRoleAnchorPending(true);
+    try {
+      const tx = await anchorRoleViaWallet(
+        pending.address,
+        pending.role,
+        pending.label || pending.role,
+      );
+      const res = await apiRequest("POST", "/api/auth/role-anchor", {
+        txHash: tx.txHash,
+      });
+      const data = (await res.json()) as {
+        wallet?: StoredWallet;
+        txHash?: string;
+      };
+      const nextHash = data.wallet?.onChainTxHash || data.txHash || tx.txHash;
+      setOnChainTxHash(nextHash);
+      if (data.wallet) {
+        localStorage.setItem(STORAGE_KEY, JSON.stringify(data.wallet));
+      } else {
+        const stored = localStorage.getItem(STORAGE_KEY);
+        if (stored) {
+          const w = JSON.parse(stored) as StoredWallet;
+          w.onChainTxHash = nextHash;
+          localStorage.setItem(STORAGE_KEY, JSON.stringify(w));
+        }
+      }
+      toast({
+        title: "Role anchored",
+        description: "Your role is recorded on Stellar.",
+      });
+      queryClient.invalidateQueries({ queryKey: ["/api"] });
+      setRoleConfirmOpen(false);
+      pendingRoleAnchor.current = null;
+    } catch (err) {
+      toast({
+        title: "Role anchor failed",
+        description: errMessage(err),
+        variant: "destructive",
+      });
+    } finally {
+      setRoleAnchorPending(false);
+    }
+  }, [toast]);
+
   return (
     <WalletContext.Provider
       value={{
@@ -318,6 +404,19 @@ export function WalletProvider({ children }: { children: ReactNode }) {
       }}
     >
       {children}
+      <TxConfirmDialog
+        open={roleConfirmOpen}
+        onOpenChange={(open) => {
+          if (roleAnchorPending) return;
+          setRoleConfirmOpen(open);
+          if (!open) pendingRoleAnchor.current = null;
+        }}
+        info={roleConfirmInfo}
+        isPending={roleAnchorPending}
+        onConfirm={() => {
+          void confirmRoleAnchor();
+        }}
+      />
     </WalletContext.Provider>
   );
 }

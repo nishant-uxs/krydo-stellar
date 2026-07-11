@@ -36,15 +36,16 @@ import {
 } from "@/components/ui/select";
 import { Users, Plus, Ban, CheckCircle2, Shield, ExternalLink, Loader2, Link2, Tag } from "lucide-react";
 import { shortenAddress } from "@/lib/wallet";
-import { issuerCategories, issuerCategoryLabels, type IssuerCategory } from "@shared/schema";
+import { issuerCategories, issuerCategoryLabels, type IssuerCategory, type Issuer } from "@shared/schema";
 import { TxSuccessDialog } from "@/components/tx-success-dialog";
 import { TxConfirmDialog, type TxConfirmInfo } from "@/components/tx-confirm-dialog";
 import { addIssuerViaWallet, revokeIssuerViaWallet } from "@/lib/contracts";
 import { explorerAccountUrl } from "@/lib/stellar";
-import type { Issuer } from "@shared/schema";
 import { useState } from "react";
 import { motion } from "framer-motion";
+import { PageShell, PageHeader, glassCardClass } from "@/components/page-shell";
 
+type IssuerRow = Issuer & { onChain?: boolean };
 
 const addIssuerSchema = z.object({
   walletAddress: z.string().regex(/^G[A-Z2-7]{55}$/, "Invalid wallet address"),
@@ -63,7 +64,7 @@ export default function IssuersPage() {
   const [confirmInfo, setConfirmInfo] = useState<TxConfirmInfo | null>(null);
   const [pendingAction, setPendingAction] = useState<(() => void) | null>(null);
 
-  const { data: issuers, isLoading } = useQuery<Issuer[]>({
+  const { data: issuers, isLoading } = useQuery<IssuerRow[]>({
     queryKey: ["/api/issuers"],
     enabled: !!address,
   });
@@ -174,62 +175,60 @@ export default function IssuersPage() {
 
   if (role !== "root") {
     return (
-      <div className="p-6 flex items-center justify-center h-full">
-        <div className="text-center">
-          <Shield className="w-12 h-12 text-muted-foreground mx-auto mb-3" />
-          <h2 className="font-serif text-xl font-bold mb-1">Access Denied</h2>
-          <p className="text-sm text-muted-foreground">Only the Root Authority can manage issuers.</p>
+      <PageShell>
+        <div className="flex items-center justify-center min-h-[50vh]">
+          <div className="text-center px-4">
+            <Shield className="w-12 h-12 text-muted-foreground mx-auto mb-3" />
+            <h2 className="font-serif text-xl font-bold mb-1">Access Denied</h2>
+            <p className="text-sm text-muted-foreground">Only the Root Authority can manage issuers.</p>
+          </div>
         </div>
-      </div>
+      </PageShell>
     );
   }
 
   return (
-    <div className="p-6 max-w-4xl mx-auto space-y-6">
-      <div className="flex flex-wrap items-start justify-between gap-3">
-        <div>
-          <h1 className="font-serif text-2xl font-bold" data-testid="text-issuers-title">
-            Manage Issuers
-          </h1>
-          <p className="text-sm text-muted-foreground mt-1">
-            Approve and revoke trusted institutions on-chain (Stellar)
-          </p>
-        </div>
-        <Dialog open={dialogOpen} onOpenChange={setDialogOpen}>
-          <DialogTrigger asChild>
-            <Button data-testid="button-add-issuer">
-              <Plus className="w-4 h-4 mr-2" />
-              Add Issuer
-            </Button>
-          </DialogTrigger>
-          <DialogContent>
-            <DialogHeader>
-              <DialogTitle className="font-serif">Approve New Issuer</DialogTitle>
-              <DialogDescription>
-                This will submit a transaction to the KrydoAuthority contract on Stellar.
-              </DialogDescription>
-            </DialogHeader>
-            <Form {...form}>
-              <form
-                onSubmit={form.handleSubmit((data) => {
-                  setDialogOpen(false);
-                  setConfirmInfo({
-                    action: "add_issuer",
-                    title: "Authorize New Issuer",
-                    description: "This will register the institution as a trusted issuer on the Stellar network.",
-                    details: [
-                      { label: "Action", value: "Add Issuer to Trust Network" },
-                      { label: "Institution", value: data.name },
-                      { label: "Wallet", value: data.walletAddress, mono: true },
-                      { label: "Contract", value: "KrydoAuthority", mono: true },
-                      { label: "Network", value: "Stellar Testnet" },
-                    ],
-                  });
-                  setPendingAction(() => () => addIssuerMutation.mutate(data));
-                  setConfirmOpen(true);
-                })}
-                className="space-y-4"
-              >
+    <PageShell>
+      <PageHeader
+        title="Manage Issuers"
+        description="Approve and revoke trusted institutions on-chain (Stellar)"
+        titleTestId="text-issuers-title"
+        actions={
+          <Dialog open={dialogOpen} onOpenChange={setDialogOpen}>
+            <DialogTrigger asChild>
+              <Button className="w-full sm:w-auto rounded-full" data-testid="button-add-issuer">
+                <Plus className="w-4 h-4 mr-2" />
+                Add Issuer
+              </Button>
+            </DialogTrigger>
+            <DialogContent className="max-w-[calc(100vw-2rem)] sm:max-w-lg rounded-2xl">
+              <DialogHeader>
+                <DialogTitle className="font-serif">Approve New Issuer</DialogTitle>
+                <DialogDescription>
+                  This will submit a transaction to the KrydoAuthority contract on Stellar.
+                </DialogDescription>
+              </DialogHeader>
+              <Form {...form}>
+                <form
+                  onSubmit={form.handleSubmit((data) => {
+                    setDialogOpen(false);
+                    setConfirmInfo({
+                      action: "add_issuer",
+                      title: "Authorize New Issuer",
+                      description: "This will register the institution as a trusted issuer on the Stellar network.",
+                      details: [
+                        { label: "Action", value: "Add Issuer to Trust Network" },
+                        { label: "Institution", value: data.name },
+                        { label: "Wallet", value: data.walletAddress, mono: true },
+                        { label: "Contract", value: "KrydoAuthority", mono: true },
+                        { label: "Network", value: "Stellar Testnet" },
+                      ],
+                    });
+                    setPendingAction(() => () => addIssuerMutation.mutate(data));
+                    setConfirmOpen(true);
+                  })}
+                  className="space-y-4"
+                >
                 <FormField
                   control={form.control}
                   name="walletAddress"
@@ -325,12 +324,13 @@ export default function IssuersPage() {
             </Form>
           </DialogContent>
         </Dialog>
-      </div>
+        }
+      />
 
       {isLoading ? (
         <div className="space-y-3">
           {[1, 2, 3].map((i) => (
-            <Skeleton key={i} className="h-24 w-full" />
+            <Skeleton key={i} className="h-24 w-full rounded-2xl" />
           ))}
         </div>
       ) : issuers && issuers.length > 0 ? (
@@ -342,12 +342,12 @@ export default function IssuersPage() {
               animate={{ opacity: 1, y: 0 }}
               transition={{ delay: i * 0.05 }}
             >
-              <Card data-testid={`card-issuer-${issuer.id}`}>
+              <Card className={glassCardClass} data-testid={`card-issuer-${issuer.id}`}>
                 <CardContent className="p-4">
-                  <div className="flex flex-wrap items-start justify-between gap-3">
+                  <div className="flex flex-col sm:flex-row sm:flex-wrap items-stretch sm:items-start justify-between gap-3">
                     <div className="min-w-0 flex-1">
                       <div className="flex items-center gap-2 mb-1 flex-wrap">
-                        <h3 className="font-semibold">{issuer.name}</h3>
+                        <h3 className="font-semibold break-words">{issuer.name}</h3>
                         <Badge
                           variant="secondary"
                           className={`text-[10px] no-default-active-elevate ${
@@ -358,10 +358,12 @@ export default function IssuersPage() {
                         >
                           {issuer.active ? "Active" : "Revoked"}
                         </Badge>
+                        {issuer.onChain !== false && (
                         <Badge variant="secondary" className="text-[10px] bg-primary/10 text-primary no-default-active-elevate">
                           <Link2 className="w-2.5 h-2.5 mr-0.5" />
                           On-Chain
                         </Badge>
+                        )}
                         {issuer.category && issuer.category !== "general" && (
                           <Badge variant="secondary" className="text-[10px] bg-chart-4/15 text-chart-4 no-default-active-elevate">
                             <Tag className="w-2.5 h-2.5 mr-0.5" />
@@ -471,6 +473,6 @@ export default function IssuersPage() {
           description={lastTx.description}
         />
       )}
-    </div>
+    </PageShell>
   );
 }

@@ -1,4 +1,4 @@
-import { Switch, Route, useLocation } from "wouter";
+import { Switch, Route, useLocation, Link } from "wouter";
 import { queryClient } from "./lib/queryClient";
 import { QueryClientProvider } from "@tanstack/react-query";
 import { Toaster } from "@/components/ui/toaster";
@@ -40,17 +40,17 @@ function AuthenticatedLayout() {
 
   return (
     <SidebarProvider style={style as React.CSSProperties}>
-      <div className="flex h-screen w-full">
+      <div className="flex h-[100dvh] w-full max-w-[100vw] overflow-hidden">
         <AppSidebar />
-        <div className="flex flex-col flex-1 min-w-0">
-          <header className="flex items-center justify-between gap-2 px-4 py-2 border-b bg-background/80 backdrop-blur-sm sticky top-0 z-40">
+        <div className="flex flex-col flex-1 min-w-0 min-h-0 overflow-hidden">
+          <header className="flex items-center justify-between gap-2 px-3 sm:px-4 py-2 border-b border-white/5 bg-background/55 backdrop-blur-xl sticky top-0 z-40 shrink-0">
             <SidebarTrigger data-testid="button-sidebar-toggle" />
-            <div className="flex items-center gap-2">
+            <div className="flex items-center gap-1.5 sm:gap-2 min-w-0">
               <ThemeToggle />
               <WalletButton />
             </div>
           </header>
-          <main className="flex-1 overflow-auto">
+          <main className="flex-1 min-h-0 overflow-y-auto overflow-x-hidden stellar-space-bg grid-bg-overlay">
             <Switch>
               <Route path="/">
                 <Redirect to="/dashboard" />
@@ -89,13 +89,17 @@ function Router() {
 
   if (isPublicVerifyRoute && !isConnected) {
     return (
-      <div className="min-h-screen bg-background">
-        <header className="border-b bg-background/80 backdrop-blur-sm sticky top-0 z-40">
-          <div className="max-w-2xl mx-auto flex items-center justify-between gap-2 px-6 py-3">
-            <div className="flex items-center gap-2">
-              <span className="font-serif font-bold text-lg">Krydo</span>
-            </div>
-            <div className="flex items-center gap-2">
+      <div className="min-h-[100dvh] max-w-[100vw] overflow-x-hidden bg-background stellar-space-bg grid-bg-overlay">
+        <header className="border-b border-white/5 bg-background/55 backdrop-blur-xl sticky top-0 z-40">
+          <div className="max-w-2xl mx-auto flex items-center justify-between gap-2 px-4 sm:px-6 py-3">
+            <Link
+              href="/"
+              className="flex items-center gap-2 min-w-0 rounded-md outline-none transition-opacity hover:opacity-90 focus-visible:ring-2 focus-visible:ring-ring"
+              data-testid="link-logo-home"
+            >
+              <span className="font-serif font-bold text-lg truncate">Krydo</span>
+            </Link>
+            <div className="flex items-center gap-1.5 sm:gap-2 shrink-0">
               <ThemeToggle />
               <WalletButton />
             </div>

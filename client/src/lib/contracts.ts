@@ -294,3 +294,19 @@ export async function anchorCredentialRenewalViaWallet(
   );
   return callAuditAnchor("renewal", idBytes, data);
 }
+
+export async function anchorZkProofViaWallet(
+  proofId: string,
+  proverAddress: string,
+  credentialHash: string,
+  commitment: string,
+): Promise<TxResult> {
+  const data = enc({
+    proofId,
+    proverAddress,
+    credentialHash,
+    commitment,
+    ts: Math.floor(Date.now() / 1000),
+  });
+  return callAuditAnchor("zkproof", id32(proofId), data);
+}

@@ -4,15 +4,15 @@ import { z } from "zod";
 import { storage } from "../storage";
 import { insertCredentialSchema } from "@shared/schema";
 import { validateClaimData } from "@shared/claim-schemas";
+import { validateIssuerClaimInputs } from "@shared/claim-consistency";
 import { credentialToVC } from "@shared/vc";
 import {
-  issueCredentialOnChain,
-  revokeCredentialOnChain,
   verifyCredentialOnChain,
   anchorCredentialRenewalOnChain,
   waitForClientTx,
   isBlockchainReady,
 } from "../blockchain";
+import { CREDENTIALS_ID, AUDIT_ID } from "@shared/contracts";
 import { requireAuth, requireRole } from "../auth/jwt";
 import { sensitiveLimiter } from "../middleware/security";
 import { readPageOpts, sendPage } from "../middleware/pagination";
@@ -114,9 +114,29 @@ export function registerCredentialRoutes(app: Express) {
         }
         const data = insertCredentialSchema.parse(body);
 
-        // Per-claim-type structured validation. For known claim types this
-        // enforces tight bounds (credit score 300-900, income >= 0, etc.);
-        // for unknown types it's a no-op that accepts any bounded JSON.
+        const claimValueStr =
+          data.claimData &&
+          typeof data.claimData === "object" &&
+          data.claimData !== null &&
+          "value" in (data.claimData as object)
+            ? String((data.claimData as { value?: unknown }).value ?? "")
+            : data.claimData &&
+                typeof data.claimData === "object" &&
+                data.claimData !== null &&
+                "score" in (data.claimData as object)
+              ? String((data.claimData as { score?: unknown }).score ?? "")
+              : "";
+        const consistencyErr = validateIssuerClaimInputs({
+          claimType: data.claimType,
+          claimSummary: data.claimSummary,
+          claimValue: claimValueStr,
+        });
+        if (consistencyErr) {
+          return res.status(400).json({ message: consistencyErr });
+        }
+
+        // Per-claim-type structured validation. UI often sends `{ value }` —
+        // coerce known types into the structured schemas first.
         data.claimData = validateClaimData(data.claimType, data.claimData);
 
         const issuer = await storage.getIssuerByAddress(data.issuerAddress);
@@ -132,22 +152,11 @@ export function registerCredentialRoutes(app: Express) {
           log.info({ txHash: clientTxHash }, "credential issued on-chain (wallet)");
           await storage.updateTransactionTxHash(result.tx.id, clientTxHash);
           finalTxHash = clientTxHash;
-        } else if (isBlockchainReady()) {
-          try {
-            const { txHash, blockNumber } = await issueCredentialOnChain(
-              data.issuerAddress,
-              result.credential.credentialHash,
-              data.holderAddress,
-              data.claimType,
-              data.claimSummary,
-            );
-            log.info({ txHash, blockNumber }, "credential issued on-chain (server)");
-            await storage.updateTransactionOnChain(result.tx.id, txHash, blockNumber);
-            finalTxHash = txHash;
-            finalBlockNumber = blockNumber;
-          } catch (err: any) {
-            log.error({ err: err.message }, "on-chain issueCredential failed");
-          }
+        } else if (CREDENTIALS_ID) {
+          return res.status(400).json({
+            message:
+              "onChainTxHash required. Confirm in the app popup, then sign issue_credential with your Stellar wallet.",
+          });
         }
 
         res.json({ ...result.credential, txHash: finalTxHash, blockNumber: finalBlockNumber });
@@ -261,19 +270,13 @@ export function registerCredentialRoutes(app: Express) {
   });
 
   /**
-   * Server-initiated on-chain anchor for a credential that was saved to
-   * Firestore but never confirmed on Stellar (e.g. the user's browser died
-   * between `storage.createCredential` and the wallet signature). Acts as
-   * a "retry" button: we sign + submit from the root wallet on behalf of
-   * the issuer, then update the tx row with the real hash + block.
-   *
-   * Caller must be the issuer of the credential (or root). Idempotent:
-   * if the credential is already confirmed on-chain per verifyCredential,
-   * we no-op and return the existing on-chain state.
+   * Link a wallet-signed issue_credential tx to an existing credential row.
+   * Idempotent: if already on-chain, returns alreadyOnChain without requiring a new hash.
    */
   app.post("/api/credentials/:id/anchor", requireAuth, sensitiveLimiter, async (req, res) => {
     try {
       const id = req.params.id as string;
+      const { onChainTxHash: clientTxHash } = req.body ?? {};
       const credential = await storage.getCredentialById(id);
       if (!credential) return res.status(404).json({ message: "Credential not found" });
 
@@ -286,44 +289,57 @@ export function registerCredentialRoutes(app: Express) {
           .json({ message: "Only the credential issuer can anchor it on-chain" });
       }
 
-      if (!isBlockchainReady()) {
-        return res
-          .status(503)
-          .json({ message: "Blockchain provider not configured on this server" });
+      // Idempotency check — don't require a new wallet tx if already confirmed.
+      if (isBlockchainReady()) {
+        const onChain = await verifyCredentialOnChain(credential.credentialHash);
+        if (onChain.valid && onChain.holder === credential.holderAddress) {
+          return res.json({
+            success: true,
+            alreadyOnChain: true,
+            message: "Credential is already anchored on-chain",
+          });
+        }
       }
 
-      // Idempotency check — don't pay gas twice for the same anchor.
-      const onChain = await verifyCredentialOnChain(credential.credentialHash);
-      if (
-        onChain.valid &&
-        onChain.holder === credential.holderAddress
-      ) {
-        return res.json({
-          success: true,
-          alreadyOnChain: true,
-          message: "Credential is already anchored on-chain",
+      if (CREDENTIALS_ID && !clientTxHash) {
+        return res.status(400).json({
+          message:
+            "onChainTxHash required. Confirm in the app popup, then sign issue_credential with your Stellar wallet.",
         });
       }
 
       const txs = await storage.getTransactions(credential.issuerAddress);
       const credTx = txs.find((t) => t.data && (t.data as any).credentialId === id);
 
-      const { txHash, blockNumber } = await issueCredentialOnChain(
-        credential.issuerAddress,
-        credential.credentialHash,
-        credential.holderAddress,
-        credential.claimType,
-        credential.claimSummary,
-      );
-      log.info({ txHash, blockNumber, credentialId: id }, "credential re-anchored on-chain (server)");
-
-      if (credTx) {
-        await storage.updateTransactionOnChain(credTx.id, txHash, blockNumber);
+      let blockNumber = "0";
+      if (clientTxHash) {
+        const result = await waitForClientTx(clientTxHash, { timeoutMs: 45_000 });
+        if (result.status === "unknown") {
+          return res.status(422).json({
+            message: "Anchor tx not found on Stellar. Retry signing on Testnet.",
+          });
+        }
+        if (result.status === "reverted") {
+          return res.status(422).json({ message: "Anchor tx reverted on-chain." });
+        }
+        if (result.status !== "confirmed") {
+          return res.status(422).json({ message: "Anchor tx still pending on Stellar. Retry shortly." });
+        }
+        blockNumber = result.blockNumber;
+        log.info({ txHash: clientTxHash, credentialId: id }, "credential re-anchored on-chain (wallet)");
+        if (credTx) {
+          await storage.updateTransactionOnChain(credTx.id, clientTxHash, blockNumber);
+        }
       }
 
-      res.json({ success: true, txHash, blockNumber, status: "confirmed" });
+      res.json({
+        success: true,
+        txHash: clientTxHash,
+        blockNumber,
+        status: "confirmed",
+      });
     } catch (error: any) {
-      log.error({ err: error.message }, "server-side credential anchor failed");
+      log.error({ err: error.message }, "credential anchor failed");
       res.status(500).json({ message: error.message });
     }
   });
@@ -350,16 +366,11 @@ export function registerCredentialRoutes(app: Express) {
 
       let chainTx: string | null = clientTxHash || null;
       let chainBlock: string | null = null;
-      if (!clientTxHash && isBlockchainReady()) {
-        try {
-          // Server can only sign as DEPLOYER; pass the acting address for auth check.
-          const r = await revokeCredentialOnChain(revokedBy, credential.credentialHash);
-          log.info({ txHash: r.txHash, blockNumber: r.blockNumber }, "credential revoked on-chain (server)");
-          chainTx = r.txHash;
-          chainBlock = r.blockNumber;
-        } catch (err: any) {
-          log.error({ err: err.message }, "on-chain revokeCredential failed");
-        }
+      if (CREDENTIALS_ID && !clientTxHash) {
+        return res.status(400).json({
+          message:
+            "onChainTxHash required. Confirm in the app popup, then sign revoke_credential with your Stellar wallet.",
+        });
       }
       if (clientTxHash) log.info({ txHash: clientTxHash }, "credential revoked on-chain (wallet)");
 
@@ -451,11 +462,15 @@ export function registerCredentialRoutes(app: Express) {
       let onChainTxHash: string | null = clientTxHash || null;
       let onChainBlockNumber: string | null = null;
 
-      // Full-SSI: if client already signed the anchor or will sign later,
-      // skip server-side on-chain anchoring.
       if (clientTxHash) {
         log.info({ txHash: clientTxHash }, "credential renewal anchored on-chain (wallet)");
+      } else if (AUDIT_ID && !clientWillAnchor) {
+        return res.status(400).json({
+          message:
+            "onChainTxHash or clientWillAnchor required. Confirm in the app popup, then sign the renewal anchor with your Stellar wallet.",
+        });
       } else if (!clientWillAnchor && isBlockchainReady()) {
+        // Offline / no audit contract — keep legacy path only when AUDIT_ID unset.
         try {
           const r = await anchorCredentialRenewalOnChain(
             credential.credentialHash,

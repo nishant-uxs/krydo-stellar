@@ -33,6 +33,7 @@ import { motion } from "framer-motion";
 import { useState } from "react";
 import { QrCodeCanvas } from "@/components/qr-code-canvas";
 import { explorerAccountUrl } from "@/lib/stellar";
+import { PageShell, PageHeader } from "@/components/page-shell";
 
 function getExpiryStatus(cred: Credential): { label: string; color: string; icon: typeof Clock } | null {
   if (!cred.expiresAt) return null;
@@ -63,24 +64,13 @@ export default function CredentialsPage() {
   };
 
   return (
-    <div className="p-6 md:p-8 max-w-4xl mx-auto space-y-8 relative">
-      {/* Decorative Blur */}
-      <div className="absolute top-0 right-10 w-72 h-72 rounded-full bg-primary/5 blur-[120px] pointer-events-none" />
-
-      <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 pb-6 border-b">
-        <div>
-          <Badge variant="outline" className="text-[10px] uppercase font-mono tracking-widest text-primary bg-primary/5 py-1 px-2">
-            Verifiable Claims
-          </Badge>
-          <h1 className="font-serif text-3xl font-extrabold tracking-tight mt-2 flex items-center gap-2" data-testid="text-credentials-title">
-            My Cryptographic Credentials
-            <Shield className="w-6 h-6 text-primary" />
-          </h1>
-          <p className="text-sm text-muted-foreground mt-1 font-sans">
-            Sovereign, mathematical claims anchored on Stellar Soroban contracts.
-          </p>
-        </div>
-      </div>
+    <PageShell>
+      <PageHeader
+        eyebrow="Verifiable Claims"
+        title="My Cryptographic Credentials"
+        description="Sovereign, mathematical claims anchored on Stellar Soroban contracts."
+        titleTestId="text-credentials-title"
+      />
 
       {isLoading ? (
         <div className="space-y-4">
@@ -286,6 +276,6 @@ export default function CredentialsPage() {
           </div>
         </DialogContent>
       </Dialog>
-    </div>
+    </PageShell>
   );
 }

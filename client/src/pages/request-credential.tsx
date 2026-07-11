@@ -48,6 +48,9 @@ import type { Issuer, CredentialRequest } from "@shared/schema";
 import { useState, useMemo } from "react";
 import { motion } from "framer-motion";
 import { anchorCredentialRequestViaWallet } from "@/lib/contracts";
+import { TxConfirmDialog, type TxConfirmInfo } from "@/components/tx-confirm-dialog";
+import { NETWORK_LABEL } from "@/lib/stellar";
+import { PageShell, PageHeader, glassCardClass } from "@/components/page-shell";
 
 export default function RequestCredentialPage() {
   const { address } = useWallet();
@@ -56,6 +59,8 @@ export default function RequestCredentialPage() {
   const [selectedIssuer, setSelectedIssuer] = useState<Issuer | null>(null);
   const [selectedClaimType, setSelectedClaimType] = useState<string>("");
   const [requestMessage, setRequestMessage] = useState("");
+  const [confirmOpen, setConfirmOpen] = useState(false);
+  const [confirmInfo, setConfirmInfo] = useState<TxConfirmInfo | null>(null);
 
   const { data: myRequests, isLoading: requestsLoading } = useQuery<CredentialRequest[]>({
     queryKey: ["/api/credential-requests/user", address],
@@ -182,23 +187,20 @@ export default function RequestCredentialPage() {
   };
 
   return (
-    <div className="p-6 max-w-4xl mx-auto space-y-6">
-      <div>
-        <h1 className="font-serif text-2xl font-bold" data-testid="text-request-title">
-          Request Credential
-        </h1>
-        <p className="text-sm text-muted-foreground mt-1">
-          Browse available issuers and request verifiable credentials
-        </p>
-      </div>
+    <PageShell>
+      <PageHeader
+        title="Request Credential"
+        description="Browse available issuers and request verifiable credentials"
+        titleTestId="text-request-title"
+      />
 
-      <Tabs defaultValue="browse">
-        <TabsList>
-          <TabsTrigger value="browse" data-testid="tab-browse-issuers">
+      <Tabs defaultValue="browse" className="min-w-0">
+        <TabsList className="w-full sm:w-auto h-auto flex flex-wrap justify-start gap-1">
+          <TabsTrigger value="browse" data-testid="tab-browse-issuers" className="flex-1 sm:flex-none">
             <Building className="w-3.5 h-3.5 mr-1.5" />
             Available Issuers
           </TabsTrigger>
-          <TabsTrigger value="history" data-testid="tab-request-history">
+          <TabsTrigger value="history" data-testid="tab-request-history" className="flex-1 sm:flex-none">
             My Requests
             {myRequests && myRequests.length > 0 && (
               <Badge variant="secondary" className="ml-1.5 text-[10px] no-default-active-elevate">
@@ -431,7 +433,28 @@ export default function RequestCredentialPage() {
             <Button
               className="w-full"
               disabled={!selectedClaimType || requestMutation.isPending}
-              onClick={() => requestMutation.mutate()}
+              onClick={() => {
+                setConfirmInfo({
+                  action: "credential_request",
+                  title: "Submit Credential Request",
+                  description:
+                    "Your request will be saved, then anchored on Stellar with your wallet signature.",
+                  details: [
+                    {
+                      label: "Credential",
+                      value: claimTypeLabels[selectedClaimType as ClaimType] || selectedClaimType,
+                    },
+                    {
+                      label: "Issuer",
+                      value: selectedIssuer?.name || "Any matching issuer",
+                    },
+                    { label: "Your wallet", value: address || "", mono: true },
+                    { label: "Contract", value: "KrydoAudit", mono: true },
+                    { label: "Network", value: NETWORK_LABEL },
+                  ],
+                });
+                setConfirmOpen(true);
+              }}
               data-testid="button-submit-request"
             >
               {requestMutation.isPending ? (
@@ -449,6 +472,17 @@ export default function RequestCredentialPage() {
           </div>
         </DialogContent>
       </Dialog>
-    </div>
+
+      <TxConfirmDialog
+        open={confirmOpen}
+        onOpenChange={setConfirmOpen}
+        info={confirmInfo}
+        isPending={requestMutation.isPending}
+        onConfirm={() => {
+          setConfirmOpen(false);
+          requestMutation.mutate();
+        }}
+      />
+    </PageShell>
   );
 }

@@ -15,6 +15,7 @@
     "deploy:audit": "tsx script/deploy-audit.ts",
     "compile:contracts": "tsx script/compile.ts",
     "clean:pending-requests": "tsx script/clean-pending-requests.ts",
+    "clean:eth-legacy": "tsx script/clean-eth-legacy.ts",
     "deploy:indexes": "tsx script/deploy-indexes.ts",
     "check:indexes": "tsx script/check-indexes.ts"
   },

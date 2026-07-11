@@ -8,6 +8,7 @@ import type { Transaction } from "@shared/schema";
 import { isOffChainTx } from "@shared/schema";
 import { motion } from "framer-motion";
 import { explorerTxUrl, explorerAccountUrl, NETWORK_LABEL } from "@/lib/stellar";
+import { PageShell, PageHeader, glassCardClass } from "@/components/page-shell";
 
 const actionColors: Record<string, string> = {
   issuer_approved: "bg-chart-3/15 text-chart-3",
@@ -15,6 +16,7 @@ const actionColors: Record<string, string> = {
   credential_issued: "bg-chart-1/15 text-chart-1",
   credential_revoked: "bg-chart-4/15 text-chart-4",
   wallet_connected: "bg-chart-2/15 text-chart-2",
+  zk_proof_generated: "bg-chart-5/15 text-chart-5",
 };
 
 export default function TransactionsPage() {
@@ -26,29 +28,24 @@ export default function TransactionsPage() {
   });
 
   return (
-    <div className="p-6 max-w-4xl mx-auto space-y-6">
-      <div>
-        <h1 className="font-serif text-2xl font-bold" data-testid="text-transactions-title">
-          Transaction Log
-        </h1>
-        <p className="text-sm text-muted-foreground mt-1">
-          On-chain transaction history verified on Stellar {NETWORK_LABEL}
-        </p>
-      </div>
+    <PageShell>
+      <PageHeader
+        title="Transaction Log"
+        description={`Activity on Krydo — on-chain Stellar ${NETWORK_LABEL} commits and local ZK events`}
+        titleTestId="text-transactions-title"
+      />
 
       {isLoading ? (
         <div className="space-y-3">
           {[1, 2, 3, 4, 5].map((i) => (
-            <Skeleton key={i} className="h-16 w-full" />
+            <Skeleton key={i} className="h-16 w-full rounded-2xl" />
           ))}
         </div>
       ) : transactions && transactions.length > 0 ? (
         <div className="space-y-2">
           {transactions.map((tx, i) => {
-            // Canonical detection: prefers tx.data.onChain === false, falls
-            // back to the OFF_CHAIN_TX_HASH sentinel. Much more robust than
-            // the old prefix heuristic.
-            const isOnChain = !isOffChainTx(tx);
+            const offChain = isOffChainTx(tx);
+            const hasLedger = !offChain && tx.blockNumber && tx.blockNumber !== "0";
             return (
               <motion.div
                 key={tx.id}
@@ -56,11 +53,11 @@ export default function TransactionsPage() {
                 animate={{ opacity: 1, y: 0 }}
                 transition={{ delay: i * 0.03 }}
               >
-                <Card data-testid={`card-tx-${tx.id}`}>
-                  <CardContent className="p-4">
-                    <div className="flex flex-wrap items-center justify-between gap-3">
-                      <div className="flex items-center gap-3 min-w-0 flex-1">
-                        <div className="w-8 h-8 rounded-md bg-muted flex items-center justify-center shrink-0">
+                <Card className={glassCardClass} data-testid={`card-tx-${tx.id}`}>
+                  <CardContent className="p-3 sm:p-4">
+                    <div className="flex flex-col sm:flex-row sm:flex-wrap sm:items-center justify-between gap-3">
+                      <div className="flex items-start sm:items-center gap-3 min-w-0 flex-1">
+                        <div className="w-8 h-8 rounded-md bg-muted flex items-center justify-center shrink-0 mt-0.5 sm:mt-0">
                           {tx.action.includes("issued") || tx.action.includes("approved") ? (
                             <ArrowUpRight className="w-4 h-4 text-chart-3" />
                           ) : (
@@ -72,13 +69,29 @@ export default function TransactionsPage() {
                             <p className="text-sm font-medium capitalize">
                               {tx.action.replace(/_/g, " ")}
                             </p>
-                            <Badge
-                              variant="secondary"
-                              className={`text-[10px] no-default-active-elevate ${actionColors[tx.action] || ""}`}
-                            >
-                              Ledger #{tx.blockNumber}
-                            </Badge>
-                            {isOnChain && (
+                            {offChain ? (
+                              <Badge
+                                variant="secondary"
+                                className="text-[10px] bg-muted text-muted-foreground no-default-active-elevate"
+                              >
+                                Off-chain
+                              </Badge>
+                            ) : hasLedger ? (
+                              <Badge
+                                variant="secondary"
+                                className={`text-[10px] no-default-active-elevate ${actionColors[tx.action] || ""}`}
+                              >
+                                Ledger #{tx.blockNumber}
+                              </Badge>
+                            ) : (
+                              <Badge
+                                variant="secondary"
+                                className="text-[10px] bg-chart-4/15 text-chart-4 no-default-active-elevate"
+                              >
+                                Ledger pending
+                              </Badge>
+                            )}
+                            {!offChain && (
                               <Badge variant="secondary" className="text-[10px] bg-primary/10 text-primary no-default-active-elevate">
                                 <Link2 className="w-2.5 h-2.5 mr-0.5" />
                                 On-Chain
@@ -86,21 +99,23 @@ export default function TransactionsPage() {
                             )}
                           </div>
                           <div className="flex items-center gap-2 mt-0.5 flex-wrap">
-                            {isOnChain ? (
+                            {offChain ? (
+                              <span className="text-[11px] text-muted-foreground">
+                                {tx.action.includes("zk")
+                                  ? "ZK proof computed locally (no Stellar tx until anchored)"
+                                  : "Local event — not a Stellar transaction"}
+                              </span>
+                            ) : (
                               <a
                                 href={explorerTxUrl(tx.txHash)}
                                 target="_blank"
                                 rel="noopener noreferrer"
-                                className="font-mono text-[11px] text-muted-foreground hover:text-primary transition-colors inline-flex items-center gap-1"
+                                className="font-mono text-[11px] text-muted-foreground hover:text-primary transition-colors inline-flex items-center gap-1 break-all"
                                 data-testid={`link-tx-hash-${tx.id}`}
                               >
                                 {tx.txHash.slice(0, 18)}...
-                                <ExternalLink className="w-2.5 h-2.5" />
+                                <ExternalLink className="w-2.5 h-2.5 shrink-0" />
                               </a>
-                            ) : (
-                              <span className="font-mono text-[11px] text-muted-foreground">
-                                {tx.txHash.slice(0, 18)}...
-                              </span>
                             )}
                             <span className="text-[11px] text-muted-foreground">
                               from{" "}
@@ -129,7 +144,7 @@ export default function TransactionsPage() {
                           </div>
                         </div>
                       </div>
-                      <p className="text-xs text-muted-foreground shrink-0">
+                      <p className="text-xs text-muted-foreground shrink-0 sm:text-right pl-11 sm:pl-0">
                         {new Date(tx.timestamp).toLocaleString()}
                       </p>
                     </div>
@@ -140,7 +155,7 @@ export default function TransactionsPage() {
           })}
         </div>
       ) : (
-        <Card>
+        <Card className={glassCardClass}>
           <CardContent className="py-16 text-center">
             <Activity className="w-10 h-10 text-muted-foreground mx-auto mb-3" />
             <h3 className="font-serif text-lg font-semibold mb-1">No Transactions</h3>
@@ -150,6 +165,6 @@ export default function TransactionsPage() {
           </CardContent>
         </Card>
       )}
-    </div>
+    </PageShell>
   );
 }

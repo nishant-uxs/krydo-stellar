@@ -149,7 +149,7 @@ export default function Landing() {
   };
 
   return (
-    <div className="min-h-screen bg-background text-foreground relative overflow-hidden stellar-space-bg grid-bg-overlay">
+    <div className="min-h-screen max-w-[100vw] overflow-x-hidden bg-background text-foreground relative stellar-space-bg grid-bg-overlay">
       
       {/* DYNAMIC BACKGROUND SPOTLIGHT LIGHT EFFECT */}
       <div 
@@ -188,7 +188,12 @@ export default function Landing() {
       {/* GORGEOUS GLASS HEADER */}
       <header className="fixed top-0 left-0 right-0 z-50 border-b border-white/5 bg-background/45 backdrop-blur-3xl transition-all duration-300">
         <div className="max-w-6xl mx-auto flex items-center justify-between gap-4 px-6 py-4">
-          <div className="flex items-center gap-2.5 group cursor-pointer" onClick={() => navigate("/")}>
+          <button
+            type="button"
+            className="flex items-center gap-2.5 group cursor-pointer bg-transparent border-0 p-0 text-left"
+            onClick={() => navigate("/")}
+            data-testid="link-logo-home"
+          >
             <div className="relative flex items-center justify-center w-8 h-8 rounded-lg bg-primary/10 border border-primary/20 group-hover:scale-105 transition-transform duration-300">
               <Shield className="w-4.5 h-4.5 text-primary" />
               <div className="absolute inset-0 rounded-lg bg-primary/20 blur-md opacity-0 group-hover:opacity-100 transition-opacity duration-300" />
@@ -196,7 +201,7 @@ export default function Landing() {
             <span className="font-serif font-bold text-xl tracking-tight bg-gradient-to-r from-foreground to-foreground/80 bg-clip-text text-transparent">
               Krydo<span className="text-primary font-sans font-medium text-sm align-super ml-0.5">stellar</span>
             </span>
-          </div>
+          </button>
           <div className="flex items-center gap-3">
             <ThemeToggle />
             <Button 
@@ -277,28 +282,28 @@ export default function Landing() {
               </motion.div>
             </motion.div>
 
-            {/* INTERACTIVE 3D + DRAGGABLE OVERLAPPING GLASS STACK (DRIBBBLE OUT-CROWD STYLE) */}
+            {/* INTERACTIVE 3D + GLASS STACK — simplified on mobile to avoid overflow */}
             <motion.div 
-              className="lg:col-span-5 relative flex items-center justify-center min-h-[550px] xl:min-h-[600px]"
+              className="lg:col-span-5 relative flex items-center justify-center min-h-[320px] sm:min-h-[420px] lg:min-h-[550px] xl:min-h-[600px] w-full max-w-full overflow-hidden"
               initial={{ opacity: 0, scale: 0.95, x: 20 }}
               animate={{ opacity: 1, scale: 1, x: 0 }}
               transition={{ duration: 0.8, delay: 0.2, ease: [0.16, 1, 0.3, 1] }}
               style={{ perspective: 1200 }}
             >
               {/* Interactive 3D Stellar Orbit Scene behind/around the Card */}
-              <div className="absolute inset-0 z-0 flex items-center justify-center opacity-90 scale-120 pointer-events-none">
+              <div className="absolute inset-0 z-0 flex items-center justify-center opacity-70 sm:opacity-90 scale-90 sm:scale-120 pointer-events-none">
                 <Stellar3DScene />
               </div>
 
               {/* CARD 1: MAIN PROVER GLASS CARD (CENTRAL AND LARGE) */}
               <motion.div 
-                drag={true}
+                drag
                 dragConstraints={{ left: 0, right: 0, top: 0, bottom: 0 }}
                 dragElastic={0.2}
                 whileDrag={{ scale: 1.03, cursor: "grabbing" }}
                 whileHover={{ rotateX: 2, rotateY: -2, y: -2 }}
                 transition={{ type: "spring", stiffness: 200, damping: 22 }}
-                className="relative z-20 rounded-3xl border border-white/15 bg-white/10 dark:bg-slate-950/25 backdrop-blur-3xl shadow-3xl p-6 glow-primary w-full max-w-[360px] cursor-grab active:cursor-grabbing select-none"
+                className="relative z-20 rounded-3xl border border-white/15 bg-white/10 dark:bg-slate-950/25 backdrop-blur-3xl shadow-3xl p-4 sm:p-6 glow-primary w-full max-w-[min(100%,360px)] mx-auto select-none md:cursor-grab md:active:cursor-grabbing"
               >
                 {/* Drag Handle Explainer Indicator */}
                 <div className="absolute top-2 left-1/2 -translate-x-1/2 flex items-center gap-1 opacity-40 hover:opacity-90 transition-opacity">
@@ -380,7 +385,7 @@ export default function Landing() {
                 whileDrag={{ scale: 1.05, zIndex: 50 }}
                 whileHover={{ scale: 1.03 }}
                 transition={{ type: "spring", stiffness: 220, damping: 18 }}
-                className="absolute top-[2%] right-[-10px] z-30 rounded-2xl border border-white/10 bg-white/5 dark:bg-slate-900/10 backdrop-blur-3xl shadow-xl p-4 w-[160px] cursor-grab active:cursor-grabbing text-xs flex flex-col gap-2.5 glow-secondary select-none"
+                className="hidden md:flex absolute top-[2%] right-[-10px] z-30 rounded-2xl border border-white/10 bg-white/5 dark:bg-slate-900/10 backdrop-blur-3xl shadow-xl p-4 w-[160px] cursor-grab active:cursor-grabbing text-xs flex-col gap-2.5 glow-secondary select-none"
               >
                 <div className="flex items-center justify-between">
                   <span className="text-[9px] text-muted-foreground uppercase font-bold tracking-wider">Trust Score</span>
@@ -406,7 +411,7 @@ export default function Landing() {
                 whileDrag={{ scale: 1.05, zIndex: 50 }}
                 whileHover={{ scale: 1.03 }}
                 transition={{ type: "spring", stiffness: 220, damping: 18 }}
-                className="absolute bottom-[2%] left-[-20px] z-30 rounded-2xl border border-white/10 bg-white/5 dark:bg-slate-900/10 backdrop-blur-3xl shadow-xl p-3.5 w-[200px] cursor-grab active:cursor-grabbing text-xs flex flex-col gap-2 glow-success select-none"
+                className="hidden md:flex absolute bottom-[2%] left-[-20px] z-30 rounded-2xl border border-white/10 bg-white/5 dark:bg-slate-900/10 backdrop-blur-3xl shadow-xl p-3.5 w-[200px] cursor-grab active:cursor-grabbing text-xs flex-col gap-2 glow-success select-none"
               >
                 <div className="flex items-center gap-2">
                   <div className="w-7 h-7 rounded-lg bg-chart-3/10 border border-chart-3/25 flex items-center justify-center text-chart-3 shrink-0">
@@ -1036,12 +1041,17 @@ export default function Landing() {
 
         <footer className="border-t border-white/5 bg-white/2 backdrop-blur-2xl">
           <div className="max-w-6xl mx-auto px-6 py-10 flex flex-col md:flex-row items-center justify-between gap-6">
-            <div className="flex items-center gap-2.5">
+            <button
+              type="button"
+              className="flex items-center gap-2.5 bg-transparent border-0 p-0 cursor-pointer hover:opacity-90 transition-opacity"
+              onClick={() => window.scrollTo({ top: 0, behavior: "smooth" })}
+              data-testid="link-logo-footer"
+            >
               <div className="w-7 h-7 rounded-lg bg-primary/10 flex items-center justify-center border border-primary/20">
                 <Shield className="w-4 h-4 text-primary" />
               </div>
               <span className="font-serif font-bold text-md tracking-tight">Krydo</span>
-            </div>
+            </button>
             <p className="text-xs text-muted-foreground/75 font-sans">
               &copy; 2026 Krydo. Built with Cryptography, Powered by Stellar Soroban.
             </p>

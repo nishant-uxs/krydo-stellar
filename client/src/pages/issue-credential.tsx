@@ -36,20 +36,33 @@ import {
 import { FileCheck, Shield, Ban, Send, Loader2, Inbox, CheckCircle2, XCircle, Clock, MessageSquare, Plus, Trash2, Link2 } from "lucide-react";
 import { claimTypes, claimTypeLabels, type ClaimType } from "@shared/schema";
 import type { Credential, CredentialRequest } from "@shared/schema";
+import { validateIssuerClaimInputs } from "@shared/claim-consistency";
 import { shortenAddress } from "@/lib/wallet";
 import { TxSuccessDialog } from "@/components/tx-success-dialog";
 import { TxConfirmDialog, type TxConfirmInfo } from "@/components/tx-confirm-dialog";
 import { issueCredentialViaWallet, revokeCredentialViaWallet } from "@/lib/contracts";
-import { useState } from "react";
+import { useState, useMemo } from "react";
 import { motion } from "framer-motion";
+import { PageShell, PageHeader, glassCardClass } from "@/components/page-shell";
 
-const issueCredentialSchema = z.object({
-  holderAddress: z.string().regex(/^G[A-Z2-7]{55}$/, "Invalid wallet address"),
-  claimType: z.enum(claimTypes),
-  claimSummary: z.string().min(1, "Summary is required").max(200),
-  claimValue: z.string().min(1, "Claim value is required"),
-  expiresIn: z.string().optional(),
-});
+const issueCredentialSchema = z
+  .object({
+    holderAddress: z.string().regex(/^G[A-Z2-7]{55}$/, "Invalid wallet address"),
+    claimType: z.enum(claimTypes),
+    claimSummary: z.string().min(1, "Summary is required").max(200),
+    claimValue: z.string().min(1, "Claim value is required"),
+    expiresIn: z.string().optional(),
+  })
+  .superRefine((data, ctx) => {
+    const err = validateIssuerClaimInputs({
+      claimType: data.claimType,
+      claimSummary: data.claimSummary,
+      claimValue: data.claimValue,
+    });
+    if (err) {
+      ctx.addIssue({ code: z.ZodIssueCode.custom, message: err, path: ["claimValue"] });
+    }
+  });
 
 interface ClaimField {
   name: string;
@@ -201,6 +214,15 @@ export default function IssueCredentialPage() {
   const [approveValue, setApproveValue] = useState("");
   const [approveExpiry, setApproveExpiry] = useState("");
 
+  const approveConsistencyError = useMemo(() => {
+    if (!approveRequest || !approveSummary.trim() || !approveValue.trim()) return null;
+    return validateIssuerClaimInputs({
+      claimType: approveRequest.claimType,
+      claimSummary: approveSummary,
+      claimValue: approveValue,
+    });
+  }, [approveRequest, approveSummary, approveValue]);
+
   const issueMutation = useMutation({
     mutationFn: async (data: z.infer<typeof issueCredentialSchema>) => {
       setMutationStep("Saving credential...");
@@ -306,16 +328,38 @@ export default function IssueCredentialPage() {
     },
   });
 
-  // Re-anchor a credential whose Firestore row exists but whose on-chain tx
-  // was never confirmed (legacy records from before the PATCH endpoint
-  // started verifying receipts, or records where the user's wallet dropped
-  // the tx). The server signs + submits from its root wallet so the user
-  // doesn't need to open the wallet; endpoint is idempotent.
+  // Re-anchor: issuer signs issue_credential again via wallet (confirm popup),
+  // then POSTs the tx hash so the server can verify and update the tx row.
   const reanchorMutation = useMutation({
     mutationFn: async (credId: string) => {
-      setMutationStep("Re-anchoring on Stellar...");
-      const res = await apiRequest("POST", `/api/credentials/${credId}/anchor`, {});
-      return res.json();
+      const credData = issuedCredentials?.find((c) => c.id === credId);
+      if (!credData) throw new Error("Credential not found");
+
+      setMutationStep("Waiting for wallet approval...");
+      let onChainTxHash: string;
+      let blockNumber: number;
+      try {
+        const txResult = await issueCredentialViaWallet(
+          credData.credentialHash,
+          credData.holderAddress,
+          credData.claimType,
+          credData.claimSummary,
+        );
+        onChainTxHash = txResult.txHash;
+        blockNumber = txResult.blockNumber;
+      } catch (err: any) {
+        if (err.code === 4001 || err.code === "ACTION_REJECTED") {
+          throw new Error("Transaction rejected in wallet");
+        }
+        throw err;
+      }
+
+      setMutationStep("Confirming on Stellar...");
+      const res = await apiRequest("POST", `/api/credentials/${credId}/anchor`, {
+        onChainTxHash,
+      });
+      const data = await res.json();
+      return { ...data, txHash: data.txHash || onChainTxHash, blockNumber: data.blockNumber || blockNumber };
     },
     onSuccess: (data: any) => {
       setMutationStep("");
@@ -391,31 +435,30 @@ export default function IssueCredentialPage() {
 
   if (role !== "issuer") {
     return (
-      <div className="p-6 flex items-center justify-center h-full">
-        <div className="text-center">
-          <Shield className="w-12 h-12 text-muted-foreground mx-auto mb-3" />
-          <h2 className="font-serif text-xl font-bold mb-1">Access Denied</h2>
-          <p className="text-sm text-muted-foreground">Only approved issuers can issue credentials.</p>
+      <PageShell>
+        <div className="flex items-center justify-center min-h-[50vh]">
+          <div className="text-center px-4">
+            <Shield className="w-12 h-12 text-muted-foreground mx-auto mb-3" />
+            <h2 className="font-serif text-xl font-bold mb-1">Access Denied</h2>
+            <p className="text-sm text-muted-foreground">Only approved issuers can issue credentials.</p>
+          </div>
         </div>
-      </div>
+      </PageShell>
     );
   }
 
   return (
-    <div className="p-6 max-w-4xl mx-auto space-y-6">
-      <div>
-        <h1 className="font-serif text-2xl font-bold" data-testid="text-issue-title">
-          Issue Credentials
-        </h1>
-        <p className="text-sm text-muted-foreground mt-1">
-          Issue verifiable credentials to users in the network
-        </p>
-      </div>
+    <PageShell>
+      <PageHeader
+        title="Issue Credentials"
+        description="Issue verifiable credentials to users in the network"
+        titleTestId="text-issue-title"
+      />
 
-      <Tabs defaultValue="issue">
-        <TabsList>
-          <TabsTrigger value="issue" data-testid="tab-issue">Issue</TabsTrigger>
-          <TabsTrigger value="requests" data-testid="tab-requests">
+      <Tabs defaultValue="issue" className="min-w-0">
+        <TabsList className="w-full sm:w-auto h-auto flex flex-wrap justify-start gap-1">
+          <TabsTrigger value="issue" data-testid="tab-issue" className="flex-1 sm:flex-none">Issue</TabsTrigger>
+          <TabsTrigger value="requests" data-testid="tab-requests" className="flex-1 sm:flex-none">
             Incoming Requests
             {pendingRequests.length > 0 && (
               <Badge variant="secondary" className="ml-1.5 text-[10px] bg-chart-4/15 text-chart-4 no-default-active-elevate">
@@ -761,7 +804,33 @@ export default function IssueCredentialPage() {
                           <Button
                             variant="outline"
                             size="sm"
-                            onClick={() => reanchorMutation.mutate(cred.id)}
+                            onClick={() => {
+                              setConfirmInfo({
+                                action: "issue_credential",
+                                title: "Re-anchor Credential",
+                                description:
+                                  "Sign issue_credential again with your wallet so this credential is confirmed on Stellar.",
+                                details: [
+                                  { label: "Action", value: "Re-anchor on-chain" },
+                                  {
+                                    label: "Type",
+                                    value:
+                                      claimTypeLabels[cred.claimType as keyof typeof claimTypeLabels] ||
+                                      cred.claimType,
+                                  },
+                                  { label: "Holder", value: cred.holderAddress, mono: true },
+                                  {
+                                    label: "Hash",
+                                    value: cred.credentialHash.slice(0, 20) + "...",
+                                    mono: true,
+                                  },
+                                  { label: "Contract", value: "KrydoCredentials", mono: true },
+                                  { label: "Network", value: "Stellar Testnet" },
+                                ],
+                              });
+                              setPendingAction(() => () => reanchorMutation.mutate(cred.id));
+                              setConfirmOpen(true);
+                            }}
                             disabled={reanchorMutation.isPending}
                             data-testid={`button-reanchor-cred-${cred.id}`}
                             title="Verify / re-submit the on-chain anchor transaction"
@@ -869,7 +938,13 @@ export default function IssueCredentialPage() {
                   value={approveValue}
                   onChange={(e) => setApproveValue(e.target.value)}
                   data-testid="input-approve-value"
+                  aria-invalid={!!approveConsistencyError}
                 />
+                {approveConsistencyError && (
+                  <p className="text-xs text-destructive mt-1.5" data-testid="text-approve-value-error">
+                    {approveConsistencyError}
+                  </p>
+                )}
               </div>
 
               <div>
@@ -889,8 +964,22 @@ export default function IssueCredentialPage() {
 
               <Button
                 className="w-full"
-                disabled={!approveSummary || !approveValue || respondMutation.isPending}
+                disabled={
+                  !approveSummary ||
+                  !approveValue ||
+                  !!approveConsistencyError ||
+                  respondMutation.isPending
+                }
                 onClick={() => {
+                  const err = validateIssuerClaimInputs({
+                    claimType: approveRequest.claimType,
+                    claimSummary: approveSummary,
+                    claimValue: approveValue,
+                  });
+                  if (err) {
+                    toast({ title: "Invalid claim", description: err, variant: "destructive" });
+                    return;
+                  }
                   let expiresAt: string | undefined;
                   if (approveExpiry) {
                     const days = parseInt(approveExpiry);
@@ -932,7 +1021,7 @@ export default function IssueCredentialPage() {
           if (!open) setPendingAction(null);
         }}
         info={confirmInfo}
-        isPending={issueMutation.isPending || revokeMutation.isPending}
+        isPending={issueMutation.isPending || revokeMutation.isPending || reanchorMutation.isPending}
         onConfirm={() => {
           setConfirmOpen(false);
           const action = pendingAction;
@@ -951,6 +1040,6 @@ export default function IssueCredentialPage() {
           description={lastTx.description}
         />
       )}
-    </div>
+    </PageShell>
   );
 }

@@ -109,6 +109,51 @@ export const claimSchemasByType = {
 export type KnownClaimType = keyof typeof claimSchemasByType;
 
 /**
+ * Issuer UI historically posts `{ value, type, fields }` instead of the
+ * structured shapes (`{ score }`, `{ amount }`, …). Coerce that form so
+ * `validateClaimData` can enforce bounds without rejecting every issuance.
+ */
+export function coerceUiClaimData(claimType: string, data: unknown): unknown {
+  if (!data || typeof data !== "object") return data;
+  const d = data as Record<string, unknown>;
+  const fields =
+    d.fields && typeof d.fields === "object"
+      ? (d.fields as Record<string, unknown>)
+      : undefined;
+  const raw = d.value ?? fields?.value ?? d.score ?? d.amount ?? d.years ?? d.ratio;
+  if (raw === undefined || raw === null || raw === "") return data;
+
+  const asNumber = () => {
+    const n = typeof raw === "number" ? raw : Number(String(raw).trim());
+    return Number.isFinite(n) ? n : NaN;
+  };
+
+  switch (claimType) {
+    case "credit_score":
+      if ("score" in d && typeof d.score === "number") return data;
+      return { score: asNumber() };
+    case "income_verification":
+      if ("amount" in d && typeof d.amount === "number") return data;
+      return { amount: asNumber() };
+    case "age":
+      if ("years" in d && typeof d.years === "number") return data;
+      return { years: asNumber() };
+    case "debt_ratio": {
+      if ("ratio" in d && typeof d.ratio === "number") return data;
+      let n = asNumber();
+      // Allow "35" meaning 35% → 0.35
+      if (n > 1 && n <= 100) n = n / 100;
+      return { ratio: n };
+    }
+    case "asset_proof":
+      if ("valueAmount" in d && typeof d.valueAmount === "number") return data;
+      return { valueAmount: asNumber() };
+    default:
+      return data;
+  }
+}
+
+/**
  * Validate structured claim data. Returns the parsed object on success, or
  * throws a ZodError (caller catches and converts to a 400 response).
  *
@@ -118,5 +163,5 @@ export type KnownClaimType = keyof typeof claimSchemasByType;
 export function validateClaimData(claimType: string, data: unknown): unknown {
   const schema = claimSchemasByType[claimType as KnownClaimType];
   if (!schema) return data;
-  return schema.parse(data);
+  return schema.parse(coerceUiClaimData(claimType, data));
 }
