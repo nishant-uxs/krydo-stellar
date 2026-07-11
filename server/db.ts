@@ -2,8 +2,14 @@ import admin from "firebase-admin";
 import fs from "fs";
 import path from "path";
 
-// Initialize Firebase Admin exactly once
-if (!admin.apps.length) {
+let initialized = false;
+
+function ensureFirebase() {
+  if (initialized || admin.apps.length) {
+    initialized = true;
+    return;
+  }
+
   const credsPath = process.env.GOOGLE_APPLICATION_CREDENTIALS;
   const inlineJson = process.env.FIREBASE_SERVICE_ACCOUNT;
 
@@ -32,25 +38,57 @@ if (!admin.apps.length) {
     projectId: process.env.FIREBASE_PROJECT_ID || (serviceAccount as any).project_id,
   });
 
-  console.log(`Firebase initialized. Project: ${process.env.FIREBASE_PROJECT_ID || (serviceAccount as any).project_id}`);
+  console.log(
+    `Firebase initialized. Project: ${process.env.FIREBASE_PROJECT_ID || (serviceAccount as any).project_id}`,
+  );
+  initialized = true;
 }
 
-export const firestore = admin.firestore();
-// Allow undefined values in writes (zk proof publicInputs can have undefined fields)
-firestore.settings({ ignoreUndefinedProperties: true });
+function getFirestore() {
+  ensureFirebase();
+  const db = admin.firestore();
+  // Allow undefined values in writes (zk proof publicInputs can have undefined fields)
+  try {
+    db.settings({ ignoreUndefinedProperties: true });
+  } catch {
+    // settings() throws if called more than once on the same instance
+  }
+  return db;
+}
+
+export const firestore = new Proxy({} as FirebaseFirestore.Firestore, {
+  get(_target, prop, receiver) {
+    return Reflect.get(getFirestore(), prop, receiver);
+  },
+});
 
 export const Timestamp = admin.firestore.Timestamp;
 export const FieldValue = admin.firestore.FieldValue;
 
-// Collection references used across storage layer
+function col(name: string) {
+  return getFirestore().collection(name);
+}
+
+// Collection references used across storage layer (lazy via getters)
 export const collections = {
-  wallets: firestore.collection("wallets"),
-  issuers: firestore.collection("issuers"),
-  credentials: firestore.collection("credentials"),
-  credentialRequests: firestore.collection("credentialRequests"),
-  transactions: firestore.collection("transactions"),
-  zkProofs: firestore.collection("zkProofs"),
+  get wallets() {
+    return col("wallets");
+  },
+  get issuers() {
+    return col("issuers");
+  },
+  get credentials() {
+    return col("credentials");
+  },
+  get credentialRequests() {
+    return col("credentialRequests");
+  },
+  get transactions() {
+    return col("transactions");
+  },
+  get zkProofs() {
+    return col("zkProofs");
+  },
 };
 
-// Alias for convenience
 export const db = firestore;

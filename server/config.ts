@@ -5,6 +5,9 @@ import { z } from "zod";
  * Central, validated configuration. Fails fast on startup if any required
  * secret is missing or malformed, so we never silently run in a half-broken
  * state.
+ *
+ * Loading is lazy so Vercel serverless can import the module graph without
+ * crashing the isolate before the request handler can return a JSON error.
  */
 const EnvSchema = z.object({
   NODE_ENV: z.enum(["development", "production", "test"]).default("development"),
@@ -16,10 +19,7 @@ const EnvSchema = z.object({
   FIREBASE_PROJECT_ID: z.string().min(1).optional(),
 
   // --- Blockchain (Stellar / Soroban) ---
-  // Soroban RPC endpoint. Optional: falls back to deployment.json's rpcUrl.
   SOROBAN_RPC_URL: z.string().url().optional(),
-  // Root/deployer secret key in StrKey form (S...). Optional: when absent the
-  // server runs in off-chain mode (no on-chain anchoring).
   DEPLOYER_SECRET: z
     .string()
     .regex(/^S[A-Z2-7]{55}$/, "DEPLOYER_SECRET must be a Stellar secret key (S...)")
@@ -27,13 +27,11 @@ const EnvSchema = z.object({
 
   // --- Auth / sessions ---
   SESSION_SECRET: z.string().min(32, "SESSION_SECRET must be at least 32 characters").default(
-    // Only used as a fallback in dev; production deploys should always override.
     "krydo-dev-session-secret-change-in-prod-please-this-is-not-secure",
   ),
   JWT_SECRET: z.string().min(32).optional(),
 
   // --- CORS ---
-  // Comma-separated list of allowed origins. Empty = allow everything in dev.
   CORS_ORIGINS: z.string().optional(),
 
   // --- Rate limiting ---
@@ -50,8 +48,6 @@ function loadConfig() {
     const msg = `Invalid environment configuration:\n${issues}`;
     // eslint-disable-next-line no-console
     console.error(msg);
-    // On Vercel, process.exit kills the isolate with FUNCTION_INVOCATION_FAILED
-    // and hides the real error. Throw so the serverless handler can return JSON.
     if (process.env.VERCEL) throw new Error(msg);
     process.exit(1);
   }
@@ -67,7 +63,6 @@ function loadConfig() {
     process.exit(1);
   }
 
-  // JWT secret defaults to SESSION_SECRET if not set.
   const jwtSecret = env.JWT_SECRET ?? env.SESSION_SECRET;
 
   return {
@@ -82,5 +77,18 @@ function loadConfig() {
   };
 }
 
-export const config = loadConfig();
-export type AppConfig = typeof config;
+export type AppConfig = ReturnType<typeof loadConfig>;
+
+let cached: AppConfig | null = null;
+
+export function getConfig(): AppConfig {
+  if (!cached) cached = loadConfig();
+  return cached;
+}
+
+/** Lazy proxy — importing this module does not validate env until first use. */
+export const config: AppConfig = new Proxy({} as AppConfig, {
+  get(_target, prop, receiver) {
+    return Reflect.get(getConfig(), prop, receiver);
+  },
+});

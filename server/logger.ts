@@ -1,14 +1,17 @@
 import pino from "pino";
-import { config } from "./config";
 
 /**
  * Central structured logger. Pretty-prints in development, JSON in production
  * so log aggregators (Datadog / Grafana Loki / CloudWatch) can parse it.
  *
  * Never log secrets: redact common sensitive keys at the formatter level.
+ * Uses NODE_ENV directly (not config) so importing this module is side-effect free
+ * on Vercel cold starts.
  */
+const isProd = process.env.NODE_ENV === "production";
+
 export const logger = pino({
-  level: process.env.LOG_LEVEL ?? (config.isProd ? "info" : "debug"),
+  level: process.env.LOG_LEVEL ?? (isProd ? "info" : "debug"),
   base: { service: "krydo" },
   redact: {
     paths: [
@@ -22,7 +25,7 @@ export const logger = pino({
     ],
     censor: "[REDACTED]",
   },
-  transport: config.isProd
+  transport: isProd
     ? undefined
     : {
         target: "pino-pretty",
