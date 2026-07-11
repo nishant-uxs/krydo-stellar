@@ -6,6 +6,7 @@
   "framework": null,
   "rewrites": [
     { "source": "/api/ping", "destination": "/api/ping" },
+    { "source": "/api/boot", "destination": "/api/boot" },
     { "source": "/api/(.*)", "destination": "/api" },
     { "source": "/healthz", "destination": "/api" },
     { "source": "/readyz", "destination": "/api" },
