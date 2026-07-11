@@ -61,6 +61,13 @@ export async function initBlockchain(): Promise<boolean> {
   const secret = process.env.DEPLOYER_SECRET;
   const rpcUrl = process.env.SOROBAN_RPC_URL || SOROBAN_RPC_URL;
 
+  // Always expose deployment metadata (deployer G..., contract ids, network)
+  // so SIWS can assign root/issuer roles even when the server cannot sign
+  // (missing DEPLOYER_SECRET). Signing still requires the secret below.
+  if (AUTHORITY_ID && CREDENTIALS_ID && DEPLOYMENT.deployer) {
+    deployment = DEPLOYMENT;
+  }
+
   if (!secret) {
     console.warn("DEPLOYER_SECRET not configured. Running in off-chain mode.");
     return false;

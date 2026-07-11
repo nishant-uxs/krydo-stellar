@@ -1,13 +1,13 @@
 import type { Express } from "express";
 import { getDeployment, isBlockchainReady } from "../blockchain";
-import { EXPLORER_URL } from "@shared/contracts";
+import { DEPLOYMENT, EXPLORER_URL } from "@shared/contracts";
 
 /**
  * Network info + disabled legacy wallet-connect endpoint.
  */
 export function registerNetworkRoutes(app: Express) {
   app.get("/api/network", async (_req, res) => {
-    const deployment = getDeployment();
+    const deployment = getDeployment() ?? (DEPLOYMENT.deployer ? DEPLOYMENT : null);
     res.json({
       blockchain: isBlockchainReady(),
       network: deployment?.network || null,

@@ -8,6 +8,7 @@ import {
   anchorRoleAssignmentOnChain,
 } from "../blockchain";
 import { stellarAddressSchema, type WalletRole } from "@shared/schema";
+import { DEPLOYMENT } from "@shared/contracts";
 import { verifySep53Message } from "@shared/sep53";
 import { issueNonce, consumeNonce } from "./nonce-store";
 import { signAuthToken } from "./jwt";
@@ -74,8 +75,9 @@ export function registerAuthRoutes(app: Express) {
       }
 
       // Detect role. Stellar addresses are case-sensitive, so we compare exact.
-      const dep = getDeployment();
-      const deployerAddr = dep?.deployer;
+      // Prefer live deployment handle; fall back to baked-in deployment.json so
+      // root still resolves when the server runs without DEPLOYER_SECRET.
+      const deployerAddr = getDeployment()?.deployer || DEPLOYMENT.deployer || "";
       let role: WalletRole = "user";
       let label = "User";
 
