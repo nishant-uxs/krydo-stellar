@@ -1,18 +1,34 @@
-import type { Express } from "express";
+import type { Express, Request } from "express";
 import helmet from "helmet";
 import cors from "cors";
 import rateLimit from "express-rate-limit";
 import { config } from "../config";
 import { SOROBAN_RPC_URL, HORIZON_URL } from "@shared/contracts";
 
+/** Client IP behind Vercel / other proxies — avoids express-rate-limit ValidationError. */
+function clientKey(req: Request): string {
+  const realIp = req.headers["x-real-ip"];
+  if (typeof realIp === "string" && realIp.length > 0) return realIp;
+  const forwarded = req.headers["x-forwarded-for"];
+  if (typeof forwarded === "string" && forwarded.length > 0) {
+    return forwarded.split(",")[0]?.trim() || "unknown";
+  }
+  return req.ip || "unknown";
+}
+
+/** Disable proxy header validations that throw on Vercel. */
+const rateLimitValidate = {
+  xForwardedForHeader: false,
+  trustProxy: false,
+} as const;
+
 /**
  * Installs a defense-in-depth stack of HTTP security middleware.
  * Must be called BEFORE the body parser / route handlers.
  */
 export function installSecurityMiddleware(app: Express) {
-  // Trust first proxy so req.ip reflects the real client when behind a load
-  // balancer / reverse proxy. Important for rate-limit fairness.
-  app.set("trust proxy", 1);
+  // Vercel sits behind multiple hops — `true` is required for correct IPs there.
+  app.set("trust proxy", process.env.VERCEL ? true : 1);
 
   // -- Helmet: sane HTTP security headers.
   // CSP is relaxed in dev so Vite HMR (inline scripts, ws://) works.
@@ -62,6 +78,8 @@ export function installSecurityMiddleware(app: Express) {
     max: config.RATE_LIMIT_MAX,
     standardHeaders: "draft-7",
     legacyHeaders: false,
+    keyGenerator: clientKey,
+    validate: rateLimitValidate,
     // Only rate-limit /api/*; static assets should not be throttled.
     skip: (req) => !req.path.startsWith("/api"),
     message: { message: "Too many requests, please slow down and retry shortly." },
@@ -78,5 +96,7 @@ export const sensitiveLimiter = rateLimit({
   max: 10,
   standardHeaders: "draft-7",
   legacyHeaders: false,
+  keyGenerator: clientKey,
+  validate: rateLimitValidate,
   message: { message: "Too many attempts, please wait a minute." },
 });

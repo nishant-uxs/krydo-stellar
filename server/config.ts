@@ -47,18 +47,23 @@ function loadConfig() {
     const issues = parsed.error.issues
       .map((i) => `  - ${i.path.join(".")}: ${i.message}`)
       .join("\n");
+    const msg = `Invalid environment configuration:\n${issues}`;
     // eslint-disable-next-line no-console
-    console.error(`Invalid environment configuration:\n${issues}`);
+    console.error(msg);
+    // On Vercel, process.exit kills the isolate with FUNCTION_INVOCATION_FAILED
+    // and hides the real error. Throw so the serverless handler can return JSON.
+    if (process.env.VERCEL) throw new Error(msg);
     process.exit(1);
   }
 
   const env = parsed.data;
 
   if (!env.GOOGLE_APPLICATION_CREDENTIALS && !env.FIREBASE_SERVICE_ACCOUNT) {
+    const msg =
+      "Missing Firebase credentials: set GOOGLE_APPLICATION_CREDENTIALS (path) or FIREBASE_SERVICE_ACCOUNT (JSON)";
     // eslint-disable-next-line no-console
-    console.error(
-      "Missing Firebase credentials: set GOOGLE_APPLICATION_CREDENTIALS (path) or FIREBASE_SERVICE_ACCOUNT (JSON)",
-    );
+    console.error(msg);
+    if (process.env.VERCEL) throw new Error(msg);
     process.exit(1);
   }
 
