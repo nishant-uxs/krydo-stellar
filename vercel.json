@@ -5,6 +5,7 @@
   "installCommand": "NPM_CONFIG_PRODUCTION=false npm install --include=optional --include=dev",
   "framework": null,
   "rewrites": [
+    { "source": "/api/ping", "destination": "/api/ping" },
     { "source": "/api/(.*)", "destination": "/api" },
     { "source": "/healthz", "destination": "/api" },
     { "source": "/readyz", "destination": "/api" },
